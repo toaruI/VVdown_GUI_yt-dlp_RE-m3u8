@@ -1,7 +1,7 @@
-import os
-import sys
 import json
+import os
 import platform
+import sys
 
 
 # =========================================
@@ -9,16 +9,33 @@ import platform
 # =========================================
 
 def get_base_path():
-    """获取程序运行的基础路径 (兼容 PyInstaller 打包后的环境)"""
+    """
+    获取项目根目录 (UniversalDownloader/)
+    - 如果是打包后的 exe，sys.executable 位于根目录
+    - 如果是脚本运行，__file__ 位于 config/config.py，需要向上退两级
+    """
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
+    else:
+        # 当前文件: .../UniversalDownloader/config/config.py
+        # 父目录: .../UniversalDownloader/config
+        # 根目录: .../UniversalDownloader
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def get_config_path():
+    """获取 config 文件夹本身的路径"""
+    if getattr(sys, 'frozen', False):
+        # 打包后，建议把 config 放在 exe 同级或者内部资源里
+        # 这里假设打包时 config 文件夹被释放到了 tmp 或者 exe 同级
+        return os.path.join(os.path.dirname(sys.executable), "config")
     else:
         return os.path.dirname(os.path.abspath(__file__))
 
 
 BASE_DIR = get_base_path()
+CONFIG_DIR = get_config_path()
 BIN_DIR = os.path.join(BASE_DIR, "bin")
-TRANSLATION_FILE = os.path.join(BASE_DIR, "config", "translations.json")
+TRANSLATION_FILE = os.path.join(CONFIG_DIR, "translations.json")
 USER_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".univ_downloader_config.json")
 
 SYSTEM = platform.system()  # Darwin / Windows / Linux
@@ -57,6 +74,7 @@ def load_translations():
         except Exception as e:
             print(f"Error loading translations: {e}")
             return _FALLBACK_TRANSLATIONS
+    print(f"Warning: Translation file not found at {TRANSLATION_FILE}")
     return _FALLBACK_TRANSLATIONS
 
 
