@@ -3,7 +3,7 @@
 VVDown is a cross-platform video downloader focused on stability, maintainability, and modern download engine support.
 It provides a GUI-based workflow and manages all required dependencies locally without relying on system-level package managers.
 
-VDown 是一个跨平台的视频下载工具，注重稳定性、可维护性以及现代下载引擎的支持。
+VVDown 是一个跨平台的视频下载工具，注重稳定性、可维护性以及现代下载引擎的支持。
 项目提供图形界面，并通过本地 bin 目录管理所有依赖，不依赖系统级包管理器。
 
 ---
