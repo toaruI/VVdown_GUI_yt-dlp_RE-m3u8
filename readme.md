@@ -1,6 +1,6 @@
-# VDown
+# VVDown
 
-VDown is a cross-platform video downloader focused on stability, maintainability, and modern download engine support.
+VVDown is a cross-platform video downloader focused on stability, maintainability, and modern download engine support.
 It provides a GUI-based workflow and manages all required dependencies locally without relying on system-level package managers.
 
 VDown 是一个跨平台的视频下载工具，注重稳定性、可维护性以及现代下载引擎的支持。
@@ -63,6 +63,72 @@ VDown 是一个跨平台的视频下载工具，注重稳定性、可维护性�
 
 ## Default Behavior & Project Status | 默认行为与项目状态
 
+## Browser Integration | 浏览器集成
+
+### Built-in Helper for Browser Plugins | 内置浏览器插件辅助功能
+
+VVDown provides built-in helpers to guide users in obtaining browser-side data required for advanced downloads.
+The application itself does **not** embed or inject browser extensions, but offers clear entry points and workflows
+for using existing open-source browser plugins.
+
+VVDown 内置了浏览器插件辅助入口，用于引导用户获取高级下载所需的数据。
+程序本身**不会嵌入或注入任何浏览器扩展**，而是基于现有的开源浏览器插件提供清晰、可控的使用流程。
+
+Supported use cases include:
+
+支持的使用场景包括：
+
+- Exporting browser cookies as `cookies.txt`  
+  导出浏览器 Cookies 为 `cookies.txt`
+
+- Capturing M3U8 / stream URLs from web pages  
+  捕获网页中的 M3U8 / 流媒体链接
+
+These helpers are optional and are only needed for certain websites or advanced workflows.
+
+这些辅助功能是可选的，仅在特定网站或高级使用场景下需要。
+
+---
+
+### Recommended Browser Plugins | 推荐使用的浏览器插件
+
+VVDown acknowledges and recommends the following open-source browser plugins:
+
+VVDown 对以下开源浏览器插件表示感谢，并推荐用户使用：
+
+- **Get cookies.txt (locally)**  
+  Used to export browser cookies into `cookies.txt` files.  
+  用于将浏览器 Cookies 导出为 `cookies.txt` 文件。
+
+  GitHub: https://github.com/kairi003/Get-cookies.txt-LOCALLY
+
+- **Cat Catch**  
+  Used to capture M3U8 and streaming media URLs from web pages.  
+  用于捕获网页中的 M3U8 及流媒体资源链接。
+
+  GitHub: https://github.com/xifangczy/cat-catch
+
+VVDown does not modify, redistribute, or bundle these plugins.
+All rights and licenses remain with their respective authors.
+
+VVDown 不会修改、分发或打包上述插件，其版权及许可证均归插件作者所有。
+
+---
+
+### Platform Notes | 平台说明
+
+- **Windows**  
+  On Windows, an external `cookies.txt` file is required for authenticated downloads.  
+  Browser cookies cannot be accessed directly by external tools.  
+  
+  在 Windows 平台上，进行登录态下载时**必须提供外置的 `cookies.txt` 文件**，
+  外部程序无法直接读取浏览器 Cookies。
+
+- **macOS / Linux**  
+  Browser cookies may be used directly for supported engines and extractors.  
+  
+  在 macOS / Linux 平台上，部分引擎和 extractor 支持直接使用浏览器 Cookies。
+
 - This GUI currently uses the default configuration of yt-dlp, FFmpeg, and N_m3u8DL-RE.  
   当前 GUI 使用 yt-dlp、FFmpeg 以及 N_m3u8DL-RE 的默认配置。
 
@@ -74,18 +140,26 @@ VDown 是一个跨平台的视频下载工具，注重稳定性、可维护性�
 
 ---
 
-## Quick Start | 快速开始
+## Running from Source | 从源码运行
+
+### Requirements | 环境要求
+
+- Python 3.10 or newer
+- pip
+
+### Install Python Dependencies | 安装 Python 依赖
+
+```bash
+pip install -r requirements.txt
+```
 
 ### Launch | 启动
+
+## Quick Start | 快速开始
 
 ```bash
 python main.py
 ```
-
-Or run the packaged executable if available.  
-或运行已打包的可执行文件（如有）。
-
----
 
 ### Fix Dependencies | 修复依赖
 
