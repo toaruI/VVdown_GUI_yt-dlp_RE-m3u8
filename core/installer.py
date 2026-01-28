@@ -1,23 +1,33 @@
 # core/installer.py
 import os
-import sys
-import subprocess
-import platform
-import zipfile
-import tarfile
 import shutil
-import urllib.request
-import time
+import subprocess
+import sys
+import tarfile
 import threading
+import time
+import urllib.request
+import zipfile
 from typing import Optional, Callable
 
 from config import BIN_DIR
+from config.config import SYSTEM, IS_MAC, IS_WIN, IS_LINUX
 from utils import ResourceProvider, is_cmd_available
 
 LogCb = Callable[[str, Optional[str]], None]
 
 
 def _safe_log(log_cb: LogCb, text: str, tag: Optional[str] = None):
+    try:
+        log_cb(text, tag)
+    except Exception:
+        try:
+            print(text)
+        except Exception:
+            pass
+
+# Raw log helper: logs plain text, bypassing i18n templates
+def _log_raw(log_cb: LogCb, text: str, tag: Optional[str] = None):
     try:
         log_cb(text, tag)
     except Exception:
@@ -36,6 +46,7 @@ class InstallController:
     """
     控制安装线程/下载的控制器，支持 stop() 以中断当前下载/安装动作。
     """
+
     def __init__(self):
         self._stop_flag = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -55,42 +66,77 @@ class InstallController:
 
 
 class DependencyInstaller:
-    def __init__(self, log_callback: LogCb, is_cn_mode: bool = False):
+    def __init__(self, log_callback: LogCb, translations: Optional[dict] = None, lang: str = "en", is_cn_mode: bool = False):
         self.log = log_callback
-        self.system = platform.system()
+        self.translations = translations or {}
+        self.lang = lang
+        self.system = SYSTEM
         # 初始化资源提供者，决定下载源
         self.resource = ResourceProvider(is_cn_mode)
+
+    # -------- i18n helpers --------
+    def set_language(self, lang: str):
+        if lang:
+            self.lang = lang
+
+    def _t(self, key: str, default: str = "", **kwargs) -> str:
+        try:
+            table = self.translations.get(self.lang) or {}
+            text = table.get(key, default)
+            if kwargs:
+                return text.format(**kwargs)
+            return text
+        except Exception:
+            return default
 
     # ---------------------------
     # Public API
     # ---------------------------
     def install_all(self):
-        """执行全套安装流程（同步阻塞）"""
-        if self.system == "Darwin":
-            self._install_mac()
-        elif self.system == "Windows":
-            self._install_windows()
-        else:
-            # 对于 Linux，尽量自动检测并提示命令
-            self.log("Linux 用户请使用包管理器安装依赖，例如:\n", "info")
-            self.log("  Debian/Ubuntu: sudo apt update && sudo apt install -y yt-dlp ffmpeg aria2\n", "tip")
-            self.log("  CentOS/Fedora: sudo yum install -y yt-dlp ffmpeg aria2\n", "tip")
+        """Install/update all dependencies into BIN_DIR (no system package managers)."""
+        ok = True
+        try:
+            ok &= bool(self._ensure_yt_dlp())
+        except Exception as e:
+            _log_raw(self.log, f"yt-dlp installation failed: {e}\n", "warning")
+            ok = False
+        try:
+            ok &= bool(self._ensure_ffmpeg())
+        except Exception as e:
+            _log_raw(self.log, f"ffmpeg installation failed: {e}\n", "warning")
+            ok = False
+        try:
+            ok &= bool(self._ensure_aria2())
+        except Exception as e:
+            _log_raw(self.log, f"aria2 installation failed: {e}\n", "warning")
+            ok = False
+        try:
+            ok &= bool(self._ensure_re())
+        except Exception as e:
+            _log_raw(self.log, f"N_m3u8DL-RE installation failed: {e}\n", "warning")
+            ok = False
+        return ok
 
     def install_all_threaded(self) -> InstallController:
-        """在后台线程运行 install_all，返回 controller（可 stop）"""
         controller = InstallController()
 
         def worker():
+            _log_raw(self.log, ">>> Installing dependencies to local bin directory...\n", "info")
+
+            ok = True
             try:
-                _safe_log(self.log, ">>> 后台开始执行依赖修复流程...\n", "info")
-                if self.system == "Darwin":
-                    self._install_mac()
-                elif self.system == "Windows":
-                    self._install_windows(controller=controller)
-                else:
-                    _safe_log(self.log, "Linux 用户请手动使用 apt/yum 安装依赖（已在日志提示）\n", "warning")
+                ok &= bool(self._ensure_yt_dlp(controller))
+                ok &= bool(self._ensure_ffmpeg(controller))
+                ok &= bool(self._ensure_aria2(controller))
+                ok &= bool(self._ensure_re(controller))
             except Exception as e:
-                _safe_log(self.log, f"❌ 安装过程中发生异常: {e}\n", "error")
+                ok = False
+                _log_raw(self.log, f"Installer crashed: {e}\n", "error")
+
+            if ok:
+                _log_raw(self.log, "All dependencies are ready.\n", "success")
+            else:
+                _log_raw(self.log, "Some dependencies failed to install. Check logs above.\n", "warning")
 
         t = threading.Thread(target=worker, daemon=True)
         controller.set_thread(t)
@@ -98,173 +144,200 @@ class DependencyInstaller:
         return controller
 
     # ---------------------------
-    # Mac installation
+    # Unified ensure helpers (bin-based, cross-platform)
     # ---------------------------
-    def _install_mac(self):
-        """
-        macOS: 生成 shell 脚本并用 Terminal 打开（与旧版行为类似）
-        """
-        _safe_log(self.log, ">>> 正在启动 macOS 终端进行安装...\n", "info")
-        _safe_log(self.log, ">>> 请在弹出的终端窗口中输入密码并等待完成。\n", "tip")
+    def _ensure_yt_dlp(self, controller: Optional[InstallController] = None) -> bool:
+        name = "yt-dlp.exe" if IS_WIN else "yt-dlp"
+        target = os.path.join(BIN_DIR, name)
 
-        script = """
-        echo "=== Universal Downloader Dependency Fixer ==="
-        echo "Check Homebrew..."
-        if ! command -v brew &> /dev/null; then
-            echo "Installing Homebrew..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-            eval "$(/opt/homebrew/bin/brew shellenv)"
-        fi
-
-        echo "Installing yt-dlp ffmpeg aria2..."
-        brew install yt-dlp ffmpeg aria2
-
-        echo "=== Done! You can close this window now. ==="
-        """
-        tmp_script = os.path.join(os.path.expanduser("~"), "ud_install.sh")
-        try:
-            with open(tmp_script, "w", encoding="utf-8") as f:
-                f.write(script)
-            os.chmod(tmp_script, 0o755)
-            subprocess.run(["open", "-a", "Terminal", tmp_script])
-        except Exception as e:
-            _safe_log(self.log, f"启动终端失败: {e}\n", "error")
-
-    # ---------------------------
-    # Windows installation
-    # ---------------------------
-    def _install_windows(self, controller: Optional[InstallController] = None):
-        """
-        Windows 安装流程:
-         1) pip 安装/更新 yt-dlp（支持 CN 镜像由 ResourceProvider 控制）
-         2) 检查/提示 ffmpeg；若资源提供地址且允许，尝试自动下载并解压到 BIN_DIR
-         3) 下载 N_m3u8DL-RE 到 bin 目录
-        """
-        _safe_log(self.log, ">>> 开始 Windows 环境修复...\n", "info")
-
-        # 1. 安装/更新 yt-dlp via pip
-        pip_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "--no-warn-script-location"]
-        if getattr(self.resource, "is_cn", False):
-            _safe_log(self.log, ">>> 检测到 CN 模式，使用清华源加速 pip...\n", "info")
-            pip_cmd.extend(["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"])
-        try:
-            _safe_log(self.log, ">>> 正在安装/更新 yt-dlp...\n", "info")
-            subprocess.check_call(pip_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            _safe_log(self.log, "✅ yt-dlp 安装/更新成功\n", "success")
-        except subprocess.CalledProcessError:
-            _safe_log(self.log, "❌ yt-dlp 安装/更新失败，请检查 Python 环境或手动安装 yt-dlp。\n", "error")
-
-        # 2. ffmpeg 检查与可选自动下载（自动下载可能很大，视资源提供情况而定）
-        if not is_cmd_available("ffmpeg"):
-            _safe_log(self.log, "⚠️ 未检测到 FFmpeg。\n", "warning")
-            ff_url = self.resource.get_dependency_url("ffmpeg")
-            if ff_url:
-                _safe_log(self.log, f">>> 检测到可用 FFmpeg 下载来源，准备下载到 {BIN_DIR}（文件较大）...\n", "info")
-                try:
-                    _ensure_bin_dir()
-                    dest = os.path.join(BIN_DIR, os.path.basename(ff_url.split("?")[0]))
-                    ok = self._download_file(ff_url, dest, controller=controller, desc="FFmpeg")
-                    if ok:
-                        # 试解压并查找 ffmpeg 可执行
-                        installed = self._extract_archive_to_bin(dest)
-                        if installed:
-                            _safe_log(self.log, "✅ FFmpeg 已成功安装到 bin 目录（或已解压）。\n", "success")
-                        else:
-                            _safe_log(self.log, "⚠️ FFmpeg 下载完成但未能自动安装，请手动将 ffmpeg 可执行加入 PATH 或放到 bin 目录。\n", "warning")
-                        try:
-                            os.remove(dest)
-                        except Exception:
-                            pass
-                    else:
-                        _safe_log(self.log, "❌ FFmpeg 下载或安装被中止/失败。\n", "error")
-                except Exception as e:
-                    _safe_log(self.log, f"❌ FFmpeg 自动安装失败: {e}\n", "error")
-            else:
-                _safe_log(self.log, "提示：请从 FFmpeg 官网下载并将 ffmpeg.exe 放入 bin 目录或 PATH。\n", "info")
-        else:
-            _safe_log(self.log, "✅ 已检测到系统 FFmpeg。\n", "success")
-
-        # 3. N_m3u8DL-RE
-        self._install_local_re(controller=controller)
-
-    # ---------------------------
-    # RE 安装
-    # ---------------------------
-    def _install_local_re(self, controller: Optional[InstallController] = None):
-        """下载 N_m3u8DL-RE 到本地 bin 目录（同步）"""
-        target_name = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
-        target_path = os.path.join(BIN_DIR, target_name)
-
-        if os.path.exists(target_path):
-            _safe_log(self.log, f"✅ N_m3u8DL-RE 已存在 ({target_path})\n", "success")
+        if os.path.exists(target):
+            _log_raw(self.log, f"yt-dlp found in bin: {target}\n", "success")
             return True
 
-        # 获取下载链接
-        url = self.resource.get_dependency_url("N_m3u8DL-RE")
+        url = self.resource.get_dependency_url("yt-dlp")
         if not url:
-            _safe_log(self.log, "❌ 无法获取 RE 下载链接\n", "error")
+            _log_raw(self.log, "yt-dlp download URL not available.\n", "warning")
             return False
 
         _ensure_bin_dir()
-        _safe_log(self.log, f">>> 正在下载 N_m3u8DL-RE...\nURL: {url}\n", "info")
+        _log_raw(self.log, f">>> Downloading yt-dlp...\nURL: {url}\n", "info")
+        ok = self._download_file(url, target, controller=controller, desc="yt-dlp")
+        if not ok:
+            _log_raw(self.log, "yt-dlp download failed.\n", "warning")
+            return False
+
+        if not IS_WIN:
+            try:
+                os.chmod(target, 0o755)
+            except Exception as e:
+                _log_raw(self.log, f"Failed to set executable permission on yt-dlp: {e}\n", "warning")
+        return True
+
+    def _ensure_ffmpeg(self, controller: Optional[InstallController] = None) -> bool:
+        name = "ffmpeg.exe" if IS_WIN else "ffmpeg"
+        target = os.path.join(BIN_DIR, name)
+
+        if os.path.exists(target):
+            _log_raw(self.log, f"ffmpeg found in bin: {target}\n", "success")
+            return True
+
+        url = self.resource.get_dependency_url("ffmpeg")
+        if not url:
+            _log_raw(self.log, "ffmpeg download URL not available.\n", "warning")
+            return False
+
+        _ensure_bin_dir()
+        _log_raw(self.log, f">>> Downloading ffmpeg...\nURL: {url}\n", "info")
+        tmp = os.path.join(BIN_DIR, "ffmpeg.tmp")
+        ok = self._download_file(url, tmp, controller=controller, desc="ffmpeg")
+        if not ok:
+            _log_raw(self.log, "ffmpeg download failed.\n", "warning")
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            return False
+
+        installed = self._extract_archive_to_bin(tmp, expected_name="ffmpeg")
+        if installed:
+            installed = self._finalize_ffmpeg_binary()
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        if not installed:
+            _log_raw(self.log, "ffmpeg extraction failed.\n", "warning")
+            return False
+        return True
+
+    def _ensure_re(self, controller: Optional[InstallController] = None) -> bool:
+        """下载 N_m3u8DL-RE 到本地 bin 目录（同步）"""
+        target_name = "N_m3u8DL-RE.exe" if IS_WIN else "N_m3u8DL-RE"
+        target_path = os.path.join(BIN_DIR, target_name)
+
+        if os.path.exists(target_path):
+            _log_raw(self.log, f"N_m3u8DL-RE already exists ({target_path}).\n", "success")
+            return True
+
+        # Get download link
+        url = self.resource.get_dependency_url("N_m3u8DL-RE")
+        if not url:
+            _log_raw(self.log, "Failed to obtain N_m3u8DL-RE download URL.\n", "warning")
+            return False
+
+        _ensure_bin_dir()
+        _log_raw(self.log, f">>> Downloading N_m3u8DL-RE...\nURL: {url}\n", "info")
         tmp_name = os.path.join(BIN_DIR, "re_temp.bin")
         try:
             ok = self._download_file(url, tmp_name, controller=controller, desc="N_m3u8DL-RE")
             if not ok:
-                _safe_log(self.log, "❌ RE 下载被中止或失败。\n", "error")
+                _log_raw(self.log, "N_m3u8DL-RE download was cancelled or failed.\n", "warning")
                 try:
                     os.remove(tmp_name)
                 except Exception:
                     pass
                 return False
 
-            # 可能是 zip/tar 包，尝试解压（若不是压缩包则直接移动作为可执行）
+            # Might be zip/tar, try to extract (otherwise move as executable)
             installed = self._extract_archive_to_bin(tmp_name, expected_name="N_m3u8DL-RE")
             if installed:
                 try:
                     os.remove(tmp_name)
                 except Exception:
                     pass
-                _safe_log(self.log, f"✅ N_m3u8DL-RE 安装成功到 {BIN_DIR}\n", "success")
+                _log_raw(self.log, f"N_m3u8DL-RE successfully installed to {BIN_DIR}.\n", "success")
                 return True
             else:
-                # 直接移动并设置可执行
+                # Directly move and set executable
                 try:
                     os.replace(tmp_name, target_path)
-                    if self.system != "Windows":
+                    if not IS_WIN:
                         os.chmod(target_path, 0o755)
-                    _safe_log(self.log, f"✅ N_m3u8DL-RE 已放置到 {target_path}\n", "success")
+                    _log_raw(self.log, f"N_m3u8DL-RE placed at {target_path}.\n", "success")
                     return True
                 except Exception as e:
-                    _safe_log(self.log, f"❌ 无法将下载文件移动到 bin: {e}\n", "error")
+                    _log_raw(self.log, f"Failed to move downloaded file to bin: {e}\n", "warning")
                     return False
         except Exception as e:
-            _safe_log(self.log, f"❌ 下载/安装 RE 失败: {e}\n", "error")
+            _log_raw(self.log, f"Failed to download/install N_m3u8DL-RE: {e}\n", "warning")
             try:
                 os.remove(tmp_name)
             except Exception:
                 pass
             return False
 
-    def install_local_re_threaded(self) -> InstallController:
-        """在后台线程下载并安装 RE，返回 controller"""
-        controller = InstallController()
 
-        def worker():
-            try:
-                self._install_local_re(controller=controller)
-            except Exception as e:
-                _safe_log(self.log, f"❌ 安装过程中发生异常: {e}\n", "error")
-
-        t = threading.Thread(target=worker, daemon=True)
-        controller.set_thread(t)
-        t.start()
-        return controller
 
     # ---------------------------
     # Helpers: download, extract
     # ---------------------------
+    def _extract_archive_to_bin(self, archive_path: str, expected_name: Optional[str] = None) -> bool:
+        """
+        Try to extract zip/tar archives into BIN_DIR and place the executable.
+        Returns True if something usable was extracted.
+        """
+        try:
+            # ZIP archives
+            if zipfile.is_zipfile(archive_path):
+                with zipfile.ZipFile(archive_path, "r") as z:
+                    names = z.namelist()
+                    target = None
+                    if expected_name:
+                        for n in names:
+                            if os.path.basename(n).startswith(expected_name):
+                                target = n
+                                break
+                    if not target:
+                        # pick first executable-like file
+                        for n in names:
+                            base = os.path.basename(n)
+                            if IS_WIN and base.lower().endswith('.exe'):
+                                target = n
+                                break
+                            if not IS_WIN and base and not os.path.splitext(base)[1]:
+                                target = n
+                                break
+                    if target:
+                        out_path = os.path.join(BIN_DIR, os.path.basename(target))
+                        with open(out_path, 'wb') as f:
+                            f.write(z.read(target))
+                        if not IS_WIN:
+                            os.chmod(out_path, 0o755)
+                        return True
+                    # fallback: extract all
+                    z.extractall(BIN_DIR)
+                    return True
+
+            # TAR archives
+            if tarfile.is_tarfile(archive_path):
+                with tarfile.open(archive_path, 'r:*') as tar:
+                    members = tar.getmembers()
+                    candidates = []
+                    for m in members:
+                        base = os.path.basename(m.name)
+                        if expected_name and base.startswith(expected_name):
+                            candidates.append(m)
+                        elif IS_WIN and base.lower().endswith('.exe'):
+                            candidates.append(m)
+                        elif not IS_WIN and base and not os.path.splitext(base)[1]:
+                            candidates.append(m)
+                    if candidates:
+                        tar.extractall(BIN_DIR)
+                        for m in candidates:
+                            try:
+                                p = os.path.join(BIN_DIR, os.path.basename(m.name))
+                                if not IS_WIN:
+                                    os.chmod(p, 0o755)
+                            except Exception:
+                                pass
+                        return True
+                    tar.extractall(BIN_DIR)
+                    return True
+        except Exception as e:
+            _log_raw(self.log, f"Extraction failed: {e}\n", "warning")
+            return False
+        return False
+
     def _download_file(self, url: str, dest_path: str, controller: Optional[InstallController] = None,
                        desc: Optional[str] = None, retries: int = 3, timeout: int = 30) -> bool:
         """
@@ -275,7 +348,7 @@ class DependencyInstaller:
         attempt = 0
         while attempt < retries:
             if controller and controller.should_stop():
-                _safe_log(self.log, f"⚠️ {desc} 下载已被取消。\n", "warning")
+                _log_raw(self.log, f"{desc} download was cancelled.\n", "warning")
                 return False
             attempt += 1
             try:
@@ -293,107 +366,129 @@ class DependencyInstaller:
                     with open(tmp_path, "wb") as f:
                         while True:
                             if controller and controller.should_stop():
-                                _safe_log(self.log, f"⚠️ {desc} 下载被用户取消。\n", "warning")
+                                _log_raw(self.log, f"{desc} download cancelled by user.\n", "warning")
                                 return False
                             chunk = resp.read(chunk_size)
                             if not chunk:
                                 break
                             f.write(chunk)
                             downloaded += len(chunk)
-                            # 频率限制：每 0.2 秒输出一次进度
+                            # Throttle: print progress every 0.5s
                             if total:
                                 percent = downloaded * 100 / total
                                 elapsed = time.time() - start
                                 speed = downloaded / 1024 / max(elapsed, 0.1)
-                                _safe_log(self.log, f"\r{desc} 下载: {percent:.1f}% ({downloaded//1024} KB) 速度: {speed:.1f} KB/s", "info")
+                                now = time.time()
+                                if not hasattr(self, "_last_progress_log") or now - getattr(self, "_last_progress_log") > 0.5:
+                                    self._last_progress_log = now
+                                    _log_raw(
+                                        self.log,
+                                        f"\r{desc} Download: {percent:.1f}% ({downloaded // 1024} KB) Speed: {speed:.1f} KB/s",
+                                        "info",
+                                    )
                             else:
-                                _safe_log(self.log, f"\r{desc} 下载: {downloaded//1024} KB", "info")
-                    # 重命名
+                                _log_raw(self.log, f"\r{desc} Download: {downloaded // 1024} KB", "info")
+                    # Rename
                     try:
                         os.replace(tmp_path, dest_path)
                     except Exception:
                         # fallback copy+remove
                         shutil.copyfile(tmp_path, dest_path)
                         os.remove(tmp_path)
-                    _safe_log(self.log, f"\n>>> {desc} 下载完成: {dest_path}\n", "info")
+                    _log_raw(self.log, f"\n>>> {desc} download completed: {dest_path}\n", "info")
                     return True
             except Exception as e:
-                _safe_log(self.log, f"\n⚠️ {desc} 下载失败（尝试 {attempt}/{retries}）: {e}\n", "warning")
+                _log_raw(self.log, f"\n{desc} download failed (attempt {attempt}/{retries}): {e}\n", "warning")
                 time.sleep(1 + attempt)
-        _safe_log(self.log, f"❌ {desc} 下载多次重试失败。\n", "error")
+        _log_raw(self.log, f"{desc} download failed after multiple retries.\n", "warning")
         return False
 
-    def _extract_archive_to_bin(self, archive_path: str, expected_name: Optional[str] = None) -> bool:
-        """
-        尝试识别并解压 zip/tar* 到 BIN_DIR，并尝试找到可执行（或指定的 expected_name）。
-        返回 True 如果解压并放置了可执行文件（或找到了 expected_name），否则 False。
-        """
-        try:
-            if zipfile.is_zipfile(archive_path):
-                with zipfile.ZipFile(archive_path, "r") as z:
-                    namelist = z.namelist()
-                    # 尝试找到常见 exe 或二进制
-                    candidates = [n for n in namelist if (n.endswith(".exe") or not os.path.splitext(n)[1])]
-                    # 优先查找 expected_name
-                    if expected_name:
-                        for n in namelist:
-                            if os.path.basename(n).startswith(expected_name):
-                                target = n
-                                break
-                        else:
-                            target = candidates[0] if candidates else None
-                    else:
-                        target = candidates[0] if candidates else None
-                    if not target:
-                        # 直接解压全部到 BIN_DIR
-                        z.extractall(BIN_DIR)
-                        return True
-                    else:
-                        extracted = z.read(target)
-                        out_path = os.path.join(BIN_DIR, os.path.basename(target))
-                        with open(out_path, "wb") as f:
-                            f.write(extracted)
-                        if platform.system() != "Windows":
-                            os.chmod(out_path, 0o755)
-                        return True
-            # tar archives
-            if tarfile.is_tarfile(archive_path):
-                with tarfile.open(archive_path, "r:*") as tar:  # type: ignore
-                    members = tar.getmembers()
-                    candidates = [m.name for m in members if (m.name.endswith(".exe") or os.path.basename(m.name) == expected_name or not os.path.splitext(m.name)[1])]
-                    if candidates:
-                        # 提取所有到 bin，然后确保权限
-                        tar.extractall(BIN_DIR)
-                        for c in candidates:
-                            try:
-                                p = os.path.join(BIN_DIR, os.path.basename(c))
-                                if platform.system() != "Windows":
-                                    os.chmod(p, 0o755)
-                            except Exception:
-                                pass
-                        return True
-                    else:
-                        tar.extractall(BIN_DIR)
-                        return True
-        except Exception as e:
-            _safe_log(self.log, f"❌ 解压失败: {e}\n", "error")
+        # (EXTRACTION MOVED TO _extract_archive_to_bin)
+    def _ensure_aria2(self, controller: Optional[InstallController] = None) -> bool:
+        name = "aria2c.exe" if IS_WIN else "aria2c"
+        target = os.path.join(BIN_DIR, name)
+
+        if os.path.exists(target):
+            _log_raw(self.log, f"aria2 found in bin: {target}\n", "success")
+            return True
+
+        url = self.resource.get_dependency_url("aria2")
+        if not url:
+            _log_raw(self.log, "aria2 download URL not available.\n", "warning")
             return False
-        return False
+
+        _ensure_bin_dir()
+        _log_raw(self.log, f">>> Downloading aria2...\nURL: {url}\n", "info")
+        tmp = os.path.join(BIN_DIR, "aria2.tmp")
+        ok = self._download_file(url, tmp, controller=controller, desc="aria2")
+        if not ok:
+            _log_raw(self.log, "aria2 download failed.\n", "warning")
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            return False
+
+        installed = self._extract_archive_to_bin(tmp, expected_name="aria2")
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        if not installed:
+            _log_raw(self.log, "aria2 extraction failed.\n", "warning")
+            return False
+        return True
 
     # ---------------------------
     # Status check
     # ---------------------------
     def check_status(self) -> dict:
-        """返回当前依赖状态字典，用于 UI 显示红/绿灯"""
-        status = {
-            "yt-dlp": is_cmd_available("yt-dlp"),
-            "ffmpeg": is_cmd_available("ffmpeg"),
-            "re": False,
-            "bin_dir": BIN_DIR
+        return {
+            "yt-dlp": os.path.exists(os.path.join(BIN_DIR, "yt-dlp.exe" if IS_WIN else "yt-dlp")),
+            "ffmpeg": os.path.exists(os.path.join(BIN_DIR, "ffmpeg.exe" if IS_WIN else "ffmpeg")),
+            "aria2": os.path.exists(os.path.join(BIN_DIR, "aria2c.exe" if IS_WIN else "aria2c")),
+            "re": os.path.exists(os.path.join(BIN_DIR, "N_m3u8DL-RE.exe" if IS_WIN else "N_m3u8DL-RE")),
+            "bin_dir": BIN_DIR,
         }
 
-        re_exe = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
-        if os.path.exists(os.path.join(BIN_DIR, re_exe)) or is_cmd_available("N_m3u8DL-RE"):
-            status["re"] = True
+    def _finalize_ffmpeg_binary(self) -> bool:
+        exe_name = "ffmpeg.exe" if IS_WIN else "ffmpeg"
+        target = os.path.join(BIN_DIR, exe_name)
 
-        return status
+        # Find ffmpeg executable anywhere under BIN_DIR
+        found = None
+        for root, dirs, files in os.walk(BIN_DIR):
+            if exe_name in files:
+                found = os.path.join(root, exe_name)
+                break
+
+        if not found:
+            return False
+
+        try:
+            shutil.copy2(found, target)
+            if not IS_WIN:
+                os.chmod(target, 0o755)
+        except Exception as e:
+            _log_raw(self.log, f"Failed to finalize ffmpeg binary: {e}\n", "warning")
+            return False
+
+        # Remove EVERYTHING except the single ffmpeg binary
+        for entry in os.listdir(BIN_DIR):
+            p = os.path.join(BIN_DIR, entry)
+            if p == target:
+                continue
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                elif os.path.isfile(p) and entry not in {
+                    exe_name,
+                    "yt-dlp.exe" if IS_WIN else "yt-dlp",
+                    "aria2c.exe" if IS_WIN else "aria2c",
+                    "N_m3u8DL-RE.exe" if IS_WIN else "N_m3u8DL-RE",
+                }:
+                    os.remove(p)
+            except Exception:
+                pass
+
+        return True

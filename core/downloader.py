@@ -1,10 +1,11 @@
 # core/downloader.py
 import os
+from config.config import SYSTEM, IS_WIN, COOKIE_PERSISTENT_CACHE_ENABLED
 import subprocess
-import platform
 import threading
-import signal
 from typing import Callable, Optional, Tuple
+import tempfile
+from pathlib import Path
 
 from config import BIN_DIR
 from utils import parse_cookie_file, is_cmd_available
@@ -40,10 +41,15 @@ def _mask_cmd_for_display(cmd_list):
     return " ".join(out)
 
 
+def _is_twitter_url(url: str) -> bool:
+    return "twitter.com" in url or "x.com" in url
+
+
 class DownloadController:
     """
     控制器用于在 UI 或上层持有正在运行的进程引用，支持 stop()
     """
+
     def __init__(self):
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
@@ -63,11 +69,13 @@ class DownloadController:
         if not proc:
             return
         try:
-            system = platform.system()
-            if system == "Windows":
-                # 强杀进程树
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if IS_WIN:
+                # Force kill process tree on Windows
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             else:
                 try:
                     proc.terminate()
@@ -79,23 +87,85 @@ class DownloadController:
 
 
 class DownloaderEngine:
-    def __init__(self, log_callback: LogCb):
+    def __init__(self, log_callback: LogCb, translations: Optional[dict] = None, lang: str = "en", on_done=None):
         """
-        :param log_callback: 一个函数，接收 (text, tag)，用于将日志发回 UI
-                             tag 建议使用: "info", "warning", "error", "success" 或 None
+        :param log_callback: function (text, tag) -> None, used to send logs back to UI
+        :param translations: translations dict loaded from json (e.g. {"zh": {...}, "en": {...}})
+        :param lang: current language key, default 'zh'
         """
         self.log = log_callback
+        self.translations = translations or {}
+        self.lang = lang
+        self.on_done = on_done
         self.process: Optional[subprocess.Popen] = None
-        self.system = platform.system()
+        self.system = SYSTEM
 
-        # Windows 隐藏控制台窗口的标志（保留旧版行为）
+        # Windows: hide console window (keep legacy behavior)
         self.startupinfo = None
-        if self.system == "Windows":
+        if IS_WIN:
             try:
                 self.startupinfo = subprocess.STARTUPINFO()
                 self.startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             except Exception:
                 self.startupinfo = None
+
+    def _bootstrap_cookies_from_browser(self, browser: str, target_url: str) -> Optional[str]:
+        """Extract browser cookies into a cookies.txt file using yt-dlp (first-run bootstrap)."""
+        try:
+            from config.config import USER_CONFIG_DIR
+            base = Path(USER_CONFIG_DIR)
+            base.mkdir(parents=True, exist_ok=True)
+            out_file = base / f"cookies_{browser}.txt"
+
+            cmd = [
+                "yt-dlp",
+                "--cookies-from-browser", browser,
+                "--skip-download",
+                "--print-to-file", "cookies", str(out_file),
+                target_url,
+            ]
+
+            subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+            if out_file.exists() and out_file.stat().st_size > 0:
+                _safe_log(self.log, f">>> 🍪 Extracted cookies from {browser} cache\n", "success")
+                return str(out_file)
+        except Exception:
+            pass
+        return None
+
+    def _notify_done(self, success: bool, rc: Optional[int]):
+        """Notify completion (UI is responsible for idempotency)."""
+        cb = self.on_done
+        if cb:
+            try:
+                cb(success, rc)
+            except Exception:
+                pass
+
+    # -------- i18n helpers (UI-facing logs only) --------
+    def set_language(self, lang: str):
+        """Update current language (called by UI when language changes)."""
+        if lang:
+            self.lang = lang
+
+    def _t(self, key: str, default: str = "", **kwargs) -> str:
+        """Translate a message key using current language.
+        Only intended for user-facing / interactive logs.
+        """
+        try:
+            table = self.translations.get(self.lang) or {}
+            text = table.get(key, default)
+            if kwargs:
+                return text.format(**kwargs)
+            return text
+        except Exception:
+            return default
 
     def _check_common_tools(self, engine: str):
         """
@@ -104,15 +174,15 @@ class DownloaderEngine:
         # 检查 yt-dlp
         if engine in ("native", "aria2"):
             if not is_cmd_available("yt-dlp"):
-                _safe_log(self.log, "⚠️ 未在 PATH 中找到 yt-dlp，下载可能无法执行。", "warning")
+                _safe_log(self.log, self._t('log_check_yt_fail', ">>> ❌ Env Check (System): yt-dlp not found. Click [Fix Dependencies].\n"), "warning")
         if engine == "re":
             re_exe = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
             re_path = os.path.join(BIN_DIR, re_exe)
             if not os.path.exists(re_path) and not is_cmd_available("N_m3u8DL-RE"):
-                _safe_log(self.log, "❌ Error: 未找到 N_m3u8DL-RE，请点击顶部【修复依赖】或把可执行文件放入 bin。", "error")
+                _safe_log(self.log, self._t('log_re_not_found', "❌ Error: N_m3u8DL-RE not found in 'bin' folder!"), "error")
         if engine == "aria2":
             if not is_cmd_available("aria2c"):
-                _safe_log(self.log, "⚠️ 未检测到 aria2c，Aria2 加速将无法使用（请安装 aria2 并确保在 PATH 中）。", "warning")
+                _safe_log(self.log, self._t('log_tip_install', "Tip: Please check if yt-dlp/ffmpeg is installed."), "warning")
 
     def _build_command(self, url: str, engine: str, save_dir: str,
                        cookie_src: str, cookie_path: str, threads: int) -> Tuple[list, Optional[str]]:
@@ -123,43 +193,67 @@ class DownloaderEngine:
         cmd = []
         cookie_header = None
 
+        # First-run bootstrap: always try browser cookies if no cookie file exists
+        if not cookie_path:
+            # choose a reasonable browser source
+            bootstrap_browser = cookie_src if cookie_src in ["chrome", "edge", "firefox", "safari"] else "chrome"
+            cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
+
         if engine == "re":
             # N_m3u8DL-RE
             re_exe = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
             re_path = os.path.join(BIN_DIR, re_exe)
-            exe_cmd = re_path if os.path.exists(re_path) else "N_m3u8DL-RE"
+            exe_cmd = re_path if os.path.isfile(re_path) else "N_m3u8DL-RE"
 
             cmd = [
                 exe_cmd,
                 url,
                 "--save-dir", save_dir,
-                "--thread-count", str(threads),
                 "--auto-select",
                 "--no-log"  # 禁用 RE 自己的日志文件，直接读 stdout
             ]
 
-            # RE 要求 Cookie 注入为 Header 格式 "k=v; k2=v2"
-            if cookie_src == "file" and cookie_path:
-                _safe_log(self.log, ">>> 正在解析 Cookie 文件以适配 RE 引擎...\n", "info")
-                cookie_str = None
+            # Only override thread count if user explicitly set it
+            if threads > 0:
+                cmd.extend(["--thread-count", str(threads)])
+
+            # Prefer cached cookies.txt (fast path), regardless of UI cookie mode
+            cookie_str = None
+            if COOKIE_PERSISTENT_CACHE_ENABLED and cookie_path:
                 try:
                     cookie_str = parse_cookie_file(cookie_path, url)
-                except Exception as e:
-                    _safe_log(self.log, f">>> ⚠️ 解析 Cookie 文件时发生异常: {e}\n", "warning")
-                if cookie_str:
-                    cookie_header = f"Cookie: {cookie_str}"
-                    cmd.extend(["--header", cookie_header])
-                    _safe_log(self.log, ">>> Cookie 解析成功，已注入 Header\n", "success")
-                else:
-                    _safe_log(self.log, ">>> ⚠️ Cookie 解析结果为空或不匹配当前域名，尝试无 Cookie 下载\n", "warning")
-            elif cookie_src in ["chrome", "edge", "safari", "firefox"]:
-                _safe_log(self.log, "⚠️ RE 引擎不支持直接读取浏览器 Cookie，请使用【Cookie插件】导出 txt 文件。\n", "warning")
-                _safe_log(self.log, ">>> 将尝试无 Cookie 下载...\n", "warning")
+                except Exception:
+                    cookie_str = None
+
+            # If cached/matched cookies exist, inject as header and skip browser cookies
+            if cookie_str:
+                cookie_header = f"Cookie: {cookie_str}"
+                cmd.extend(["--header", cookie_header])
+                _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Using cached cookies.txt\n"), "success")
+            else:
+                # Fallback to UI-selected cookie mode
+                if cookie_src == "file" and cookie_path:
+                    _safe_log(self.log, self._t('log_cookie_filter', ">>> Filtering cookies for target host: {host}...\n", host=""), "info")
+                    try:
+                        cookie_str = parse_cookie_file(cookie_path, url)
+                    except Exception as e:
+                        _safe_log(self.log, self._t('log_cookie_parse_error', ">>> ⚠️ Failed to parse cookie file: {e}\n", e=e), "warning")
+                    if cookie_str:
+                        cookie_header = f"Cookie: {cookie_str}"
+                        cmd.extend(["--header", cookie_header])
+                        _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Loaded cookies from file\n"), "success")
+                    else:
+                        _safe_log(self.log, self._t('log_cookie_none', "⚠️ No cookies found for {host}. Falling back to direct download.", host=""), "warning")
+                elif cookie_src in ["chrome", "edge", "safari", "firefox"]:
+                    _safe_log(self.log, self._t('log_re_no_browser', "⚠️ RE engine does not support direct browser link."), "warning")
 
         else:
             # yt-dlp 路径
+            yt_path = os.path.join(BIN_DIR, "yt-dlp.exe" if IS_WIN else "yt-dlp")
+            yt_cmd = yt_path if os.path.isfile(yt_path) else "yt-dlp"
+
             cmd = [
-                "yt-dlp",
+                yt_cmd,
                 "-P", save_dir,
                 "--merge-output-format", "mp4",
                 "--retries", "10",
@@ -168,22 +262,44 @@ class DownloaderEngine:
             ]
 
             if engine == "aria2":
-                cmd.extend([
-                    "--downloader", "aria2c",
-                    "--downloader-args", f"aria2c:-x {threads} -k 1M"
-                ])
-                _safe_log(self.log, f">>> 启用 Aria2 加速 (线程: {threads})\n", "info")
+                aria2_path = os.path.join(BIN_DIR, "aria2c.exe" if IS_WIN else "aria2c")
+                aria2_cmd = aria2_path if os.path.isfile(aria2_path) else "aria2c"
 
-            if cookie_src == "file" and cookie_path:
-                cmd.extend(["--cookies", cookie_path])
-                _safe_log(self.log, f">>> 已加载 Cookie 文件: {os.path.basename(cookie_path)}\n", "info")
-            elif cookie_src in ["chrome", "edge", "safari", "firefox"]:
-                cmd.extend(["--cookies-from-browser", cookie_src])
-                _safe_log(self.log, f">>> 尝试读取浏览器 Cookie: {cookie_src}\n", "info")
+                cmd.extend([
+                    "--downloader", aria2_cmd,
+                    "--downloader-args", f"{aria2_cmd}:-x {threads} -k 1M"
+                ])
+                _safe_log(self.log, self._t('log_aria2_enabled', ">>> Aria2 acceleration enabled (threads: {threads})\n", threads=threads), "info")
+
+            # yt-dlp extractor-aware cookie strategy
+            if _is_twitter_url(url):
+                # Twitter / X: always prefer browser cookies (officially supported)
+                if cookie_src in ["chrome", "edge", "firefox", "safari"]:
+                    _safe_log(self.log, self._t('log_cookie_from_browser', ">>> Using browser cookies for Twitter/X: {browser}\n", browser=cookie_src), "info")
+                    cmd.extend(["--cookies-from-browser", cookie_src])
+                else:
+                    _safe_log(self.log, self._t('log_cookie_none', "⚠️ Twitter/X requires browser cookies for authenticated access."), "warning")
+            else:
+                # Non-Twitter sites: prefer cookies.txt (fast path)
+                cookie_str = None
+                if cookie_path:
+                    try:
+                        cookie_str = parse_cookie_file(cookie_path, url)
+                    except Exception:
+                        cookie_str = None
+
+                if cookie_str:
+                    _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Using cookies.txt (auto)\n"), "success")
+                    cmd.extend(["--header", f"Cookie: {cookie_str}"])
+                else:
+                    # Fallback to browser cookies
+                    if cookie_src in ["chrome", "edge", "firefox", "safari"]:
+                        _safe_log(self.log, self._t('log_cookie_from_browser', ">>> Loading cookies from browser: {browser}\n", browser=cookie_src), "info")
+                        cmd.extend(["--cookies-from-browser", cookie_src])
 
         return cmd, cookie_header
 
-    def run(self, url: str, options: dict) -> bool:
+    def run(self, url: str, options: dict, controller: Optional['DownloadController'] = None) -> Tuple[bool, Optional[int]]:
         """
         同步运行下载（阻塞）。保持与旧版接口一致：返回 True/False。
         options: 包含 engine, threads, cookie_source, cookie_path, download_dir
@@ -194,9 +310,9 @@ class DownloaderEngine:
         cookie_path = options.get("cookie_path", "")
         # 保证 threads 为 int
         try:
-            threads = int(options.get("threads", 4))
+            threads = int(options.get("threads", 0))
         except Exception:
-            threads = 4
+            threads = 0
 
         # 工具检查提示（不会直接抛错）
         self._check_common_tools(engine)
@@ -206,9 +322,14 @@ class DownloaderEngine:
 
         # 脱敏后的命令展示
         display_cmd = _mask_cmd_for_display(cmd)
-        _safe_log(self.log, f"Execute: {display_cmd}\n{'-' * 40}\n", "info")
+        _safe_log(
+            self.log,
+            f">>> {self._t('log_exec_cmd', 'Execute Command')}: {display_cmd}\n{'-' * 40}\n",
+            "info",
+        )
 
         error_detected = False
+        return_code = None
         try:
             # 创建子进程
             self.process = subprocess.Popen(
@@ -223,6 +344,8 @@ class DownloaderEngine:
                 startupinfo=self.startupinfo,
                 creationflags=subprocess.CREATE_NO_WINDOW if self.system == "Windows" else 0
             )
+            if controller:
+                controller._set_proc(self.process)
 
             # 实时读取输出
             assert self.process.stdout is not None
@@ -233,7 +356,8 @@ class DownloaderEngine:
 
                 lower_line = line.lower()
                 # 扩展错误嗅探关键词
-                if any(k in lower_line for k in ["error", "403 forbidden", "command not found", "unable to download", "failed", "exception"]):
+                if any(k in lower_line for k in
+                       ["error", "403 forbidden", "command not found", "unable to download", "failed", "exception"]):
                     _safe_log(self.log, line + "\n", "error")
                     error_detected = True
                 else:
@@ -242,19 +366,20 @@ class DownloaderEngine:
             self.process.wait()
             return_code = self.process.returncode
 
-            if return_code == 0 and not error_detected:
-                _safe_log(self.log, "\n>>> 🎉 下载任务完成！\n", "success")
-                return True
+            success = (return_code == 0 and not error_detected)
+            if success:
+                _safe_log(self.log, self._t('log_download_success', '\n>>> 🎉 Download Success!\n'), "success")
             else:
-                _safe_log(self.log, f"\n>>> ❌ 下载结束，但似乎发生了错误 (Code: {return_code})\n", "error")
-                return False
+                _safe_log(self.log, self._t('log_download_fail', '\n>>> ❌ Download Failed.\n'), "error")
+
+            return success, return_code
 
         except FileNotFoundError as e:
-            _safe_log(self.log, f"\n>>> ❌ 可执行文件未找到: {e}\n", "error")
-            return False
+            _safe_log(self.log, self._t('log_exec_not_found', '>>> ❌ Executable not found: {e}\n', e=e), "error")
+            return False, None
         except Exception as e:
-            _safe_log(self.log, f"\n>>> ❌ 发生异常: {e}\n", "error")
-            return False
+            _safe_log(self.log, self._t('log_exception_generic', '>>> ❌ Exception occurred: {e}\n', e=e), "error")
+            return False, None
         finally:
             self.process = None
 
@@ -265,89 +390,18 @@ class DownloaderEngine:
         controller = DownloadController()
 
         def worker():
-            # 在子线程内调用同步 run，但通过 controller._set_proc 将进程引用暴露给外部
-            engine = options.get("engine", "native")
-            save_dir = options.get("download_dir", ".")
-            cookie_src = options.get("cookie_source", "none")
-            cookie_path = options.get("cookie_path", "")
+            success = False
+            rc = None
             try:
-                threads = int(options.get("threads", 4))
+                success, rc = self.run(url, options, controller)
             except Exception:
-                threads = 4
-
-            # 构建命令（和 run 中一致）
-            self._check_common_tools(engine)
-            cmd, cookie_header = self._build_command(url, engine, save_dir, cookie_src, cookie_path, threads)
-            display_cmd = _mask_cmd_for_display(cmd)
-            _safe_log(self.log, f"Execute: {display_cmd}\n{'-' * 40}\n", "info")
-
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    startupinfo=self.startupinfo,
-                    creationflags=subprocess.CREATE_NO_WINDOW if self.system == "Windows" else 0
-                )
-                # 将 proc 暴露给 controller 和实例 self.process（方便兼容旧逻辑）
-                controller._set_proc(proc)
-                self.process = proc
-
-                assert proc.stdout is not None
-                error_detected = False
-                for raw_line in proc.stdout:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    lower_line = line.lower()
-                    if any(k in lower_line for k in ["error", "403 forbidden", "command not found", "unable to download", "failed", "exception"]):
-                        _safe_log(self.log, line + "\n", "error")
-                        error_detected = True
-                    else:
-                        _safe_log(self.log, line + "\n", None)
-
-                proc.wait()
-                return_code = proc.returncode
-                if return_code == 0 and not error_detected:
-                    _safe_log(self.log, "\n>>> 🎉 下载任务完成！\n", "success")
-                else:
-                    _safe_log(self.log, f"\n>>> ❌ 下载结束，但似乎发生了错误 (Code: {return_code})\n", "error")
-            except FileNotFoundError as e:
-                _safe_log(self.log, f"\n>>> ❌ 可执行文件未找到: {e}\n", "error")
-            except Exception as e:
-                _safe_log(self.log, f"\n>>> ❌ 发生异常: {e}\n", "error")
+                success = False
+                rc = None
             finally:
-                # 清理
                 controller._set_proc(None)
-                self.process = None
+                self._notify_done(success, rc)
 
         th = threading.Thread(target=worker, daemon=True)
         controller._set_thread(th)
         th.start()
         return controller
-
-    def stop(self):
-        """
-        兼容旧接口：停止当前 process（如果有的话）
-        """
-        if self.process:
-            _safe_log(self.log, "\n>>> 正在终止进程...\n", "warning")
-            try:
-                if self.system == "Windows":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    try:
-                        self.process.terminate()
-                    except Exception:
-                        try:
-                            self.process.kill()
-                        except Exception:
-                            pass
-            except Exception:
-                pass

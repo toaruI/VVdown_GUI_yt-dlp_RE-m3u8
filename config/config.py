@@ -22,6 +22,7 @@ def get_base_path():
         # 根目录: .../UniversalDownloader
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
 def get_config_path():
     """获取 config 文件夹本身的路径"""
     if getattr(sys, 'frozen', False):
@@ -38,9 +39,36 @@ BIN_DIR = os.path.join(BASE_DIR, "bin")
 TRANSLATION_FILE = os.path.join(CONFIG_DIR, "translations.json")
 USER_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".univ_downloader_config.json")
 
+# =========================================
+# Cookie parsing cache (Performance)
+# =========================================
+
+# Enable in-memory cache for matched cookies (recommended)
+COOKIE_CACHE_ENABLED = True
+COOKIE_PERSISTENT_CACHE_ENABLED = True
+COOKIE_PERSISTENT_CACHE_FILE = "cookie_match_cache.json"
+
+# Max number of cached (cookie_path, host) entries
+# Small value keeps memory usage predictable
+COOKIE_CACHE_MAX_ENTRIES = 64
+
+# =========================================
+# System detection
+# =========================================
+OS_DARWIN = "Darwin"
+OS_WINDOWS = "Windows"
+OS_LINUX = "Linux"
+
+SUPPORTED_SYSTEMS = {"Darwin", "Windows", "Linux"}
+
+# NOTE:
+# platform.system() is only called here.
+# Other modules should import SYSTEM / IS_* flags from this file.
 SYSTEM = platform.system()  # Darwin / Windows / Linux
-IS_MAC = SYSTEM == "Darwin"
-IS_WIN = SYSTEM == "Windows"
+IS_MAC = SYSTEM == OS_DARWIN
+IS_WIN = SYSTEM == OS_WINDOWS
+IS_LINUX = SYSTEM == OS_LINUX
+SUPPORTED_SYSTEMS = {"Darwin", "Windows", "Linux"}
 
 # =========================================
 # 2. 翻译数据管理 (Translations)

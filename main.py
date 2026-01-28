@@ -1,6 +1,9 @@
-import tkinter as tk
 import ctypes
 import platform
+import sys
+
+from PySide6.QtWidgets import QApplication
+
 from ui.app_window import MainWindow
 
 
@@ -16,14 +19,15 @@ def main():
             except Exception:
                 pass
 
-    # 2. 创建根窗口
-    root = tk.Tk()
+    # 2. 创建 Qt 应用（⚠️ 不再使用 tkinter）
+    app = QApplication(sys.argv)
 
-    # 3. 初始化主界面逻辑
-    app = MainWindow(root)
+    # 3. 创建主窗口（Qt Widget，不要传 Tk root）
+    win = MainWindow()
+    win.show()
 
-    # 4. 进入主循环
-    root.mainloop()
+    # 4. 进入 Qt 事件循环
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

@@ -1,67 +1,108 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext, messagebox
-import threading
-import webbrowser
-import platform
+# -*- coding: utf-8 -*-
+"""
+PySide6 MainWindow
+- Default language: English
+- Language switching syncs UI / downloader / installer
+- No hard-coded Chinese UI logs
+"""
+
 import os
+import threading
 
-# === 配置与工具导入 ===
-from config.config import (
-    TRANSLATIONS,
-    SYSTEM,
-    BIN_DIR,
-    load_user_config,
-    save_user_config
+from PySide6.QtCore import Qt, Signal, Slot, QThreadPool, QTimer
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
+    QComboBox, QGroupBox, QRadioButton, QFileDialog, QPlainTextEdit,
+    QSpinBox, QMessageBox, QApplication
 )
-from utils import setup_env_path, open_download_folder
-from .widgets import setup_styles, setup_paste_fix
 
-# === 核心逻辑导入 (适配新版接口) ===
-# 注意：downloader，installer 是类
+from config.config import TRANSLATIONS, SYSTEM, load_user_config, save_user_config
 from core.downloader import DownloaderEngine
 from core.installer import DependencyInstaller
+from utils import setup_env_path, open_download_folder, resolve_cookie_plugin_url
+from .widgets import setup_styles, PasteFix
 
 
-class MainWindow:
-    def __init__(self, root):
-        self.root = root
+class MainWindow(QWidget):
+    installer_finished_signal = Signal(bool)
+    def _reset_download_ui(self):
+        """Reset UI state after download finishes or is stopped (v6 behavior)."""
+        t = self.get_current_trans()
+        self.download_controller = None
+        self.download_btn.setText(t["btn_start"])
+        self.install_btn.setEnabled(True)
+        self.btn_path.setEnabled(True)
+        self.btn_sel_cookie.setEnabled(self.cookie_source == "file")
+    log_signal = Signal(str, str)
+    download_finished_signal = Signal(bool)
+
+    def _os_supported_browsers(self):
+        """v6multi semantics: which browser cookies make sense on this OS."""
+        from config.config import IS_MAC, IS_WIN, IS_LINUX
+        if IS_MAC:
+            return {"safari", "chrome", "firefox"}
+        elif IS_WIN:
+            return {"chrome", "edge", "firefox"}
+        elif IS_LINUX:
+            return {"chrome", "firefox"}
+        else:
+            return {"chrome", "firefox"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.system = SYSTEM
 
-        # 1. 加载配置
+        # ---- config ----
         self.config_data = load_user_config()
-        self.lang = self.config_data.get("lang", "zh")
+        self.lang = self.config_data.get("lang", "en")
         self.download_dir = self.config_data.get("download_dir", os.path.expanduser("~/Downloads"))
         self.cookie_file_path = self.config_data.get("cookie_path", "")
 
-        # 2. 初始化环境
+        # cookie mode (v6multi compatible, OS-based default)
+        default_cookie = self.config_data.get("cookie_source")
+        if not default_cookie:
+            if self.system == "Darwin":
+                default_cookie = "safari"
+            elif self.system == "Windows":
+                default_cookie = "chrome"
+            else:
+                default_cookie = "firefox"
+        self.cookie_source = default_cookie
+
+        # ---- env ----
         setup_env_path()
         self.font_ui, self.font_bold, self.font_log = setup_styles(self.system)
         self.cmd_key = "Command" if self.system == "Darwin" else "Control"
 
-        # 3. 核心对象初始化
-        # 下载控制器：下载开始时会被赋值，下载结束或停止时置空
+        # ---- core ----
         self.download_controller = None
+        self.downloader = DownloaderEngine(
+            self.log_thread_safe,
+            translations=TRANSLATIONS,
+            lang=self.lang,
+        )
 
-        # 初始化 DownloaderEngine 实例（传入线程安全的日志回调）
-        # 这样我们后面可以通过 self.downloader.run_threaded(...) 启动任务
-        self.downloader = DownloaderEngine(self.log_thread_safe)
+        # v6-style explicit wiring (safe even if __init__ signature changes)
+        self.downloader.on_done = self.on_download_done
 
-        # 安装器：初始化时传入日志回调
-        # 注意：这里假设 Installer 内部会自动判断 CN 模式，或者你需要根据配置传入
-        # 如果你的 installer.__init__ 需要 is_cn_mode，请在这里修改，例如: is_cn_mode=True
-        self.installer = DependencyInstaller(self.log_thread_safe)
+        self.installer = DependencyInstaller(
+            self.log_thread_safe,
+            translations=TRANSLATIONS,
+            lang=self.lang,
+        )
 
-        # 4. 构建界面
-        self.setup_window()
-        self.build_ui()
-        self.setup_tags()
+        self.threadpool = QThreadPool.globalInstance()
 
-        # 5. 启动后操作
+        # ---- ui ----
+        self._build_ui()
         self.restore_config_state()
         self.check_deps_on_start()
+        self.log_signal.connect(self._append_log)
 
-    # --- 基础辅助 ---
+        self.download_finished_signal.connect(self._handle_download_done)
+        self.installer_finished_signal.connect(self._on_installer_finished)
 
+    # ---------------- helpers ----------------
     def get_current_trans(self):
         return TRANSLATIONS.get(self.lang, TRANSLATIONS["en"])
 
@@ -69,327 +110,518 @@ class MainWindow:
         self.config_data[key] = value
         save_user_config(self.config_data)
 
-    def log(self, text, tag=None):
-        """主线程日志写入"""
-        self.log_text.insert(tk.END, text, tag)
-        self.log_text.see(tk.END)
-
     def log_thread_safe(self, text, tag=None):
-        """跨线程日志调用 (传给 Core 使用)"""
-        self.root.after(0, lambda: self.log(text, tag))
+        self.log_signal.emit(text, tag or "info")
 
-    # --- 界面构建 ---
+    @Slot(str, str)
+    def _append_log(self, text, tag):
+        prefix = {"error": "❌ ", "success": "✅ ", "warning": "⚠️ "}.get(tag, "")
+        self.log_text.appendPlainText(prefix + text)
+        self.log_text.setMaximumBlockCount(1000)
 
-    def setup_window(self):
+    # ---------------- UI ----------------
+    def _build_ui(self):
         t = self.get_current_trans()
         display_name = "macOS" if self.system == "Darwin" else self.system
-        self.root.title(f"{t['title']} ({display_name})")
-        if self.system == "Darwin":
-            self.root.geometry("740x820")
-        else:
-            self.root.geometry("740x780")
+        self.setWindowTitle(f"{t['title']} ({display_name})")
+        self.resize(740, 820 if self.system == "Darwin" else 780)
 
-    def build_ui(self):
+        root = QVBoxLayout(self)
+
+        # top bar
+        top = QHBoxLayout()
+        self.btn_open = QPushButton(t["btn_open_dir"])
+        self.btn_open.setFixedWidth(110)
+        self.btn_open.clicked.connect(lambda: open_download_folder(self.download_dir))
+        top.addWidget(self.btn_open)
+
+        self.btn_clear = QPushButton(t["btn_clear_log"])
+        self.btn_clear.setFixedWidth(110)
+        self.btn_clear.clicked.connect(lambda: self.log_text.clear())
+        top.addWidget(self.btn_clear)
+
+        top.addStretch()
+
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(["English", "中文"])
+        self.lang_combo.setCurrentIndex(0 if self.lang == "en" else 1)
+        self.lang_combo.currentIndexChanged.connect(self.change_language)
+        top.addWidget(QLabel("🌐"))
+        top.addWidget(self.lang_combo)
+
+        self.install_btn = QPushButton(t["btn_fix_dep"])
+        self.install_btn.setFixedWidth(150)
+        self.install_btn.clicked.connect(self.run_install)
+        top.addWidget(self.install_btn)
+
+        root.addLayout(top)
+
+        # url
+        self.url_group = QGroupBox(t["frame_url"])
+        v = QVBoxLayout(self.url_group)
+        self.url_entry = QLineEdit()
+        PasteFix(self.url_entry, self.cmd_key)
+        v.addWidget(self.url_entry)
+        root.addWidget(self.url_group)
+
+        # tools
+        self.tools_group = QGroupBox(t["frame_tools"])
+        tv = QVBoxLayout(self.tools_group)
+        hl = QHBoxLayout()
+        # cookie mode radios (v6multi)
+        self.rb_guest = QRadioButton(t["mode_guest"])
+        self.rb_chrome = QRadioButton("Chrome")
+        self.rb_edge = QRadioButton("Edge")
+        self.rb_firefox = QRadioButton("Firefox")
+        self.rb_safari = QRadioButton("Safari")
+        self.rb_file = QRadioButton(t["mode_local_file"])
+
+        for rb in [self.rb_guest, self.rb_chrome, self.rb_edge, self.rb_firefox, self.rb_safari, self.rb_file]:
+            hl.addWidget(rb)
+
+        # Enforce exclusive radios (Qt fix, Tk semantics)
+        from PySide6.QtWidgets import QButtonGroup
+        self.cookie_group = QButtonGroup(self)
+        for rb in [self.rb_guest, self.rb_chrome, self.rb_edge, self.rb_firefox, self.rb_safari, self.rb_file]:
+            self.cookie_group.addButton(rb)
+
+        # default selection (v6multi exact)
+        cookie_map = {
+            "none": self.rb_guest,
+            "chrome": self.rb_chrome,
+            "edge": self.rb_edge,
+            "firefox": self.rb_firefox,
+            "safari": self.rb_safari,
+            "file": self.rb_file,
+        }
+        # hide browsers not supported on this OS (v6multi)
+        supported = self._os_supported_browsers()
+        if "chrome" not in supported:
+            self.rb_chrome.hide()
+        if "edge" not in supported:
+            self.rb_edge.hide()
+        if "firefox" not in supported:
+            self.rb_firefox.hide()
+        if "safari" not in supported:
+            self.rb_safari.hide()
+
+        # sanitize cookie_source if unsupported
+        if self.cookie_source not in supported and self.cookie_source not in {"file", "none"}:
+            self.cookie_source = "none"
+
+        cookie_map.get(self.cookie_source, self.rb_guest).setChecked(True)
+
+        # cookie file select
+        self.btn_sel_cookie = QPushButton(t["btn_select"])
+        self.btn_sel_cookie.clicked.connect(self.select_cookie_file)
+        hl.addWidget(self.btn_sel_cookie)
+
+        # local file label (below file picker, v6multi)
+        self.file_label = QLabel(t["status_no_file"])
+        self.file_label.setStyleSheet("color:#888")
+        hl.addWidget(self.file_label)
+
+        tv.addLayout(hl)
+
+        # cookie & m3u8 helpers (v6multi features)
+        helper_layout = QHBoxLayout()
+
+        # 1) cookies.txt exporter (for RE)
+        self.btn_cookie_plugin = QPushButton(
+            t.get("btn_cookie_export", "Get cookies.txt")
+        )
+        self.btn_cookie_plugin.setFixedWidth(160)
+        self.btn_cookie_plugin.clicked.connect(self.open_cookie_plugin)
+        helper_layout.addWidget(self.btn_cookie_plugin)
+
+        # 2) CatCatch (m3u8 capture)
+        self.btn_catcatch = QPushButton(
+            t.get("btn_catcatch", "Get m3u8 (CatCatch)")
+        )
+        self.btn_catcatch.setFixedWidth(160)
+        self.btn_catcatch.clicked.connect(self.open_catcatch)
+        helper_layout.addWidget(self.btn_catcatch)
+
+        helper_layout.addStretch()
+        tv.addLayout(helper_layout)
+
+        root.addWidget(self.tools_group)
+
+        # controls
+        ctrl = QHBoxLayout()
+        ev = QVBoxLayout()
+        self.lbl_engine = QLabel(t["label_engine"])
+        ev.addWidget(self.lbl_engine)
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItems([t["engine_native"], t["engine_aria2"], t["engine_re"]])
+        self.engine_combo.currentIndexChanged.connect(self.toggle_engine_ui)
+        ev.addWidget(self.engine_combo)
+
+        th = QHBoxLayout()
+        self.lbl_threads = QLabel(t.get("label_threads", "Threads:"))
+        th.addWidget(self.lbl_threads)
+        self.thread_spin = QSpinBox()
+        self.thread_spin.setRange(1, 64)
+        self.thread_spin.setValue(8)
+        self.thread_spin.setEnabled(False)
+        th.addWidget(self.thread_spin)
+        ev.addLayout(th)
+        ctrl.addLayout(ev)
+
+        pv = QVBoxLayout()
+        ph = QHBoxLayout()
+        self.lbl_save_path = QLabel(t["label_save_path"])
+        ph.addWidget(self.lbl_save_path)
+        self.path_label = QLabel(self.download_dir[-30:])
+        self.path_label.setStyleSheet("color:#007AFF")
+        ph.addWidget(self.path_label)
+        ph.insertStretch(0, 1)
+        pv.addLayout(ph)
+        self.btn_path = QPushButton(t["btn_change_path"])
+        self.btn_path.setFixedWidth(110)
+        self.btn_path.clicked.connect(self.change_download_path)
+        pv.addWidget(self.btn_path, alignment=Qt.AlignRight)
+        ctrl.addLayout(pv)
+        root.addLayout(ctrl)
+
+        # start
+        self.download_btn = QPushButton(t["btn_start"])
+        self.download_btn.setFixedWidth(280)
+        self.download_btn.clicked.connect(self.toggle_download)
+        root.addWidget(self.download_btn, alignment=Qt.AlignHCenter)
+
+        # log
+        self.lbl_log = QLabel(t["label_log"])
+        root.addWidget(self.lbl_log)
+        self.log_text = QPlainTextEdit()
+        self.log_text.setReadOnly(True)
+        root.addWidget(self.log_text)
+
+        for src, rb in {
+            "none": self.rb_guest,
+            "chrome": self.rb_chrome,
+            "edge": self.rb_edge,
+            "firefox": self.rb_firefox,
+            "safari": self.rb_safari,
+            "file": self.rb_file,
+        }.items():
+            rb.toggled.connect(lambda checked, s=src: checked and self._set_cookie_source(s))
+
+        # file picker enabled only in file mode (startup safety)
+        self.btn_sel_cookie.setEnabled(self.cookie_source == "file")
+
+    # ---------------- logic ----------------
+    def _set_cookie_source(self, source: str):
+        # v6multi-compatible cookie state machine
+        self.cookie_source = source
+        self.update_config("cookie_source", source)
+
+        # file picker only enabled in file mode
+        self.btn_sel_cookie.setEnabled(source == "file")
+
+        # update file label when leaving file mode
+        if source != "file" and not self.cookie_file_path:
+            self.file_label.setText(self.get_current_trans()["status_no_file"])
+
+        # logging (exact v6multi semantics)
         t = self.get_current_trans()
-        main_frame = ttk.Frame(self.root, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        if source == "none":
+            self.log_thread_safe(t.get("log_warning_guest", "Warning: Guest mode"), "warning")
+        elif source == "file":
+            self.log_thread_safe(t.get("log_mode_file", "Mode: Cookie file"), "info")
+        else:
+            self.log_thread_safe(
+                t.get("log_mode_browser", "Mode: {} Cookie").format(source.capitalize()),
+                "info",
+            )
 
-        # Top Bar
-        top = ttk.Frame(main_frame)
-        top.pack(fill=tk.X, pady=(0, 15))
+    def toggle_engine_ui(self):
+        is_re = self.engine_combo.currentIndex() == 2
 
-        self.btn_open = ttk.Button(top, text=t["btn_open_dir"], command=lambda: open_download_folder(self.download_dir),
-                                   width=12)
-        self.btn_open.pack(side=tk.LEFT, padx=(0, 5))
+        # RE DOES support thread-count; keep enabled for all engines
+        self.thread_spin.setEnabled(True)
 
-        self.btn_clear = ttk.Button(top, text=t["btn_clear_log"], command=lambda: self.log_text.delete(1.0, tk.END),
-                                    width=10)
-        self.btn_clear.pack(side=tk.LEFT, padx=(0, 5))
+        # v6multi rule: RE does not support browser cookies -> grey out browser cookie radios
+        for src, rb in {
+            "chrome": self.rb_chrome,
+            "edge": self.rb_edge,
+            "firefox": self.rb_firefox,
+            "safari": self.rb_safari,
+        }.items():
+            if rb.isVisible():
+                rb.setEnabled(not is_re)
 
-        ttk.Label(top, text="🌐").pack(side=tk.LEFT, padx=(10, 2))
-        self.lang_combo = ttk.Combobox(top, values=["中文", "English"], width=8, state="readonly")
-        self.lang_combo.set("中文" if self.lang == "zh" else "English")
-        self.lang_combo.pack(side=tk.LEFT)
-        self.lang_combo.bind("<<ComboboxSelected>>", self.change_language)
-
-        self.install_btn = ttk.Button(top, text=t["btn_fix_dep"], command=self.run_install, style="Fix.TButton")
-        self.install_btn.pack(side=tk.RIGHT)
-
-        # Input
-        self.input_frame = ttk.LabelFrame(main_frame, text=t["frame_url"], padding="15 10")
-        self.input_frame.pack(fill=tk.X, pady=(0, 15))
-        self.url_entry = ttk.Entry(self.input_frame, font=("Arial", 11))
-        self.url_entry.pack(fill=tk.X, ipady=4)
-        setup_paste_fix(self.url_entry, self.cmd_key, t)
-
-        # Tools
-        self.cookie_frame = ttk.LabelFrame(main_frame, text=t["frame_tools"], padding="15 10")
-        self.cookie_frame.pack(fill=tk.X, pady=(0, 15))
-        self.cookie_source = tk.StringVar(value="none")
-
-        mode_frame = ttk.Frame(self.cookie_frame)
-        mode_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.rb_guest = ttk.Radiobutton(mode_frame, text=t["mode_guest"], variable=self.cookie_source, value="none",
-                                        style="Big.TRadiobutton")
-        self.rb_guest.pack(side=tk.LEFT, padx=(0, 10))
-
-        self.lbl_local = ttk.Label(mode_frame, text=t["mode_local_file"], font=self.font_ui)
-        self.lbl_local.pack(side=tk.LEFT, padx=(10, 0))
-        self.btn_sel_cookie = ttk.Button(mode_frame, text=t["btn_select"], width=8, command=self.select_cookie_file)
-        self.btn_sel_cookie.pack(side=tk.LEFT, padx=5)
-        self.file_label = ttk.Label(mode_frame, text=t["status_no_file"], foreground="#888", width=15)
-        self.file_label.pack(side=tk.LEFT)
-
-        helper_frame = ttk.Frame(self.cookie_frame)
-        helper_frame.pack(fill=tk.X, pady=(5, 0))
-        self.lbl_plugin = ttk.Label(helper_frame, text=t["label_get_plugin"], foreground="#666", font=self.font_ui)
-        self.lbl_plugin.pack(side=tk.LEFT, padx=(0, 5))
-        self.btn_plugin = ttk.Button(helper_frame, text=t["btn_cookie_plugin"], width=12,
-                                     command=lambda: webbrowser.open("https://github.com/Wait4MyDriver"))
-        self.btn_plugin.pack(side=tk.LEFT, padx=2)
-
-        # Controls
-        ctrl_frame = ttk.Frame(main_frame)
-        ctrl_frame.pack(fill=tk.X, pady=(0, 15))
-
-        opt_frame = ttk.Frame(ctrl_frame)
-        opt_frame.pack(side=tk.LEFT)
-        self.lbl_engine = ttk.Label(opt_frame, text=t["label_engine"], font=self.font_bold)
-        self.lbl_engine.pack(anchor="w", pady=(0, 5))
-
-        self.engine_var = tk.StringVar(value="native")
-        rf = ttk.Frame(opt_frame)
-        rf.pack(anchor="w")
-        self.rb_native = ttk.Radiobutton(rf, text=t["engine_native"], variable=self.engine_var, value="native",
-                                         command=self.toggle_engine_ui)
-        self.rb_native.pack(side=tk.LEFT, padx=(0, 8))
-        self.rb_aria = ttk.Radiobutton(rf, text=t["engine_aria2"], variable=self.engine_var, value="aria2",
-                                       command=self.toggle_engine_ui)
-        self.rb_aria.pack(side=tk.LEFT, padx=(0, 8))
-        self.rb_re = ttk.Radiobutton(rf, text=t["engine_re"], variable=self.engine_var, value="re",
-                                     command=self.toggle_engine_ui)
-        self.rb_re.pack(side=tk.LEFT)
-
-        tf = ttk.Frame(opt_frame)
-        tf.pack(anchor="w", pady=(5, 0))
-        self.lbl_thread = ttk.Label(tf, text=t.get("label_threads", "Threads:"), font=self.font_ui, foreground="#666")
-        self.lbl_thread.pack(side=tk.LEFT)
-        self.thread_var = tk.StringVar(value="8")
-        self.thread_combo = ttk.Combobox(tf, textvariable=self.thread_var, width=5, state="disabled",
-                                         values=("4", "8", "16", "32"))
-        self.thread_combo.pack(side=tk.LEFT, padx=5)
-
-        pf = ttk.Frame(ctrl_frame)
-        pf.pack(side=tk.RIGHT, anchor="n")
-        plf = ttk.Frame(pf)
-        plf.pack(anchor="e")
-        self.lbl_save = ttk.Label(plf, text=t["label_save_path"], foreground="#666", font=self.font_ui)
-        self.lbl_save.pack(side=tk.LEFT)
-        self.path_label = ttk.Label(plf, text=self.download_dir[-30:], foreground="#007AFF", font=self.font_ui)
-        self.path_label.pack(side=tk.LEFT, padx=5)
-        self.btn_path = ttk.Button(pf, text=t["btn_change_path"], command=self.change_download_path, width=10)
-        self.btn_path.pack(anchor="e", pady=5)
-
-        self.download_btn = ttk.Button(main_frame, text=t["btn_start"], command=self.toggle_download, width=35)
-        self.download_btn.pack(pady=10)
-
-        # Log
-        self.lbl_log = ttk.Label(main_frame, text=t["label_log"], font=self.font_bold)
-        self.lbl_log.pack(anchor="w", pady=(0, 5))
-        self.log_text = scrolledtext.ScrolledText(main_frame, bg="#2b2b2b", fg="#cccccc", font=self.font_log, height=12)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-
-    def setup_tags(self):
-        self.log_text.tag_config("info", foreground="#61afef")
-        self.log_text.tag_config("success", foreground="#98c379")
-        self.log_text.tag_config("error", foreground="#e06c75")
-        self.log_text.tag_config("warning", foreground="#e5c07b")
-        self.log_text.tag_config("tip", foreground="#E6a23c")
-
-    # --- 逻辑交互 ---
+        # if currently on browser cookie and switched to RE, fall back to guest
+        if is_re and self.cookie_source in {"chrome", "edge", "firefox", "safari"}:
+            self.rb_guest.setChecked(True)
 
     def toggle_download(self):
         t = self.get_current_trans()
-
-        # 1. 如果正在下载 -> 执行停止逻辑
-        if self.download_controller:
-            self.log(f"\n>>> {t.get('log_download_stop', 'Stopping...')}\n", "warning")
+        if self.download_controller and self.download_controller._proc:
+            # v6 behavior: reset UI immediately, then stop process asynchronously
+            self.log_thread_safe(t.get("log_download_stop", "\n>>> Download Stopped.\n"), "warning")
+            controller = self.download_controller
+            self._reset_download_ui()
             try:
-                self.download_controller.stop()
+                controller.stop()
             except Exception:
                 pass
-            # 按钮状态会在 on_download_done 回调中恢复
             return
 
-        # 2. 如果未下载 -> 开始新任务
-        url = self.url_entry.get().strip()
+        url = self.url_entry.text().strip()
         if not url:
-            messagebox.showwarning("Tip", t.get("msg_input_url", "URL cannot be empty"))
+            QMessageBox.warning(self, "Tip", t.get("msg_input_url", "Please enter a URL"))
             return
 
-        # 清日志并把按钮切为 Stop
-        self.log_text.delete(1.0, tk.END)
-        self.download_btn.config(text=t["btn_stop"], state=tk.NORMAL)
 
-        # 收集 options，保持和 core/downloader.py 里 run_threaded 的参数一致
-        options = {
-            "engine": self.engine_var.get(),
+        self.log_text.clear()
+        self.download_btn.setText(t["btn_stop"])
+
+        opts = {
+            "engine": ["native", "aria2", "re"][self.engine_combo.currentIndex()],
             "download_dir": self.download_dir,
-            "threads": int(self.thread_var.get()) if self.thread_var.get().isdigit() else 4,
-            "cookie_source": self.cookie_source.get(),
+            "threads": self.thread_spin.value(),
+            "cookie_source": self.cookie_source,
             "cookie_path": self.cookie_file_path,
         }
 
-        # 启动下载：使用实例方法 run_threaded 返回一个 controller
         try:
-            self.download_controller = self.downloader.run_threaded(url, options)
+            self.download_controller = self.downloader.run_threaded(url, opts)
         except Exception as e:
-            self.log_thread_safe(f"❌ 无法启动下载: {e}\n", "error")
-            # 恢复按钮
-            self.download_btn.config(text=t["btn_start"])
+            self.log_thread_safe(str(e), "error")
+            self.download_btn.setText(t["btn_start"])
             self.download_controller = None
             return
 
-        # 可选：在 UI 上禁用一些控件以防止重复操作
-        self.install_btn.config(state=tk.DISABLED)
-        self.btn_path.config(state=tk.DISABLED)
-        self.btn_sel_cookie.config(state=tk.DISABLED)
+        self.install_btn.setEnabled(False)
+        self.btn_path.setEnabled(False)
+        self.btn_sel_cookie.setEnabled(False)
 
     def on_download_done(self, success, rc=None):
-        """下载结束回调 (由 Core 线程调用，需要切回 UI 线程)"""
-        # 直接安排 UI 线程执行最终处理
-        self.root.after(0, lambda: self._handle_download_done(success, rc))
+        self.download_finished_signal.emit(bool(success))
 
-    def _handle_download_done(self, success, rc=None):
-        """UI 线程处理下载结束"""
-        t = self.get_current_trans()
-        # 播放完成提示
-        try:
-            self.play_sound(success)
-        except Exception:
-            pass
-        # 清理 controller 并恢复按钮及控件
-        self.download_controller = None
-        self.download_btn.config(text=t["btn_start"])
-        self.install_btn.config(state=tk.NORMAL)
-        self.btn_path.config(state=tk.NORMAL)
-        self.btn_sel_cookie.config(state=tk.NORMAL)
-
-        # 可选：弹窗提示（如果你希望）
-        if success:
-            self.log("\n>>> 下载成功。\n", "success")
-        else:
-            self.log("\n>>> 下载失败，请查看日志以获得更多信息。\n", "error")
+    def _handle_download_done(self, success):
+        # v6 semantics: always reset UI on completion
+        # Result logging is handled by downloader (avoid duplicate logs)
+        self._reset_download_ui()
 
     def run_install(self):
-        """运行依赖修复（线程化）"""
         t = self.get_current_trans()
-        self.install_btn.config(state=tk.DISABLED, text=t.get("btn_fix_dep_running", "Fixing..."))
+        # disable install UI immediately
+        self.install_btn.setEnabled(False)
+        self.install_btn.setText(t.get("btn_fix_dep_running", "Fixing..."))
 
-        try:
-            # 如果 installer 提供了非阻塞接口
-            controller = self.installer.install_all_threaded()
-        except AttributeError:
-            # 向后兼容：如果没有线程化接口，则用线程包装同步函数
-            def _task_sync():
-                try:
-                    self.installer.install_all()
-                except Exception as e:
-                    self.log_thread_safe(f"Error during install: {e}\n", "error")
-                finally:
-                    self.root.after(0, lambda: messagebox.showinfo("Done", t.get("msg_fix_done", "Check finished.")))
-                    self.root.after(0, lambda: self.install_btn.config(state=tk.NORMAL, text=t["btn_fix_dep"]))
+        # start installer in its own thread-safe controller
+        controller = self.installer.install_all_threaded()
 
-            threading.Thread(target=_task_sync, daemon=True).start()
-            return
+        # watcher runs in a plain Python thread (not a Qt worker) and notifies UI on main thread
+        def watcher():
+            success = True
+            try:
+                # wait for the install thread to finish, if available
+                th = getattr(controller, "_thread", None)
+                if th is not None:
+                    th.join()
+                else:
+                    # fallback: if controller exposes is_alive use that loop
+                    is_alive = getattr(controller, "is_alive", None)
+                    if callable(is_alive):
+                        while is_alive():
+                            threading.Event().wait(0.2)
+            except Exception:
+                success = False
+            # emit back to main thread to update UI
+            self.installer_finished_signal.emit(success)
 
-        # 如果得到了 controller，就在后台等待其完成以恢复 UI（轻量方法）
-        def _watch():
-            # 简单地轮询 controller 状态
-            while controller.is_alive():
-                self.root.after(200, lambda: None)  # 保持 UI 响应
-                controller._thread.join(0.2)  # 非阻塞 join
-            # 安装结束，恢复按钮
-            self.root.after(0, lambda: messagebox.showinfo("Done", t.get("msg_fix_done", "Check finished.")))
-            self.root.after(0, lambda: self.install_btn.config(state=tk.NORMAL, text=t["btn_fix_dep"]))
+        threading.Thread(target=watcher, daemon=True).start()
 
-        threading.Thread(target=_watch, daemon=True).start()
+    @Slot(bool)
+    def _on_installer_finished(self, success: bool):
+        t = self.get_current_trans()
+        if success:
+            self.log_thread_safe(t.get("msg_fix_done", "Finished"), "success")
+        else:
+            self.log_thread_safe(t.get("msg_fix_failed", "Dependency installation finished with errors"), "warning")
+        self.install_btn.setEnabled(True)
+        self.install_btn.setText(t["btn_fix_dep"])
 
     def check_deps_on_start(self):
-        """启动时静默检测"""
-
-        def _check():
+        def task():
             try:
                 status = self.installer.check_status()
-                # 根据状态更新 UI（例如在 log 显示或颜色）
+                t = self.get_current_trans()
                 if not status.get("yt-dlp"):
-                    self.log_thread_safe("⚠️ 未检测到 yt-dlp，某些功能可能不可用。\n", "warning")
+                    self.log_thread_safe(t.get("log_check_yt_fail", "yt-dlp not found"), "warning")
                 if not status.get("ffmpeg"):
-                    self.log_thread_safe("⚠️ 未检测到 ffmpeg，视频合并可能失败。\n", "warning")
-                # 你可以在这里把状态展示成图标、按钮颜色等
-            except Exception as e:
-                # 不让启动日志抛出
+                    self.log_thread_safe(t.get("log_check_re_warning", "ffmpeg not found"), "warning")
+            except Exception:
                 pass
+        self.threadpool.start(task)
 
-        threading.Thread(target=_check, daemon=True).start()
-
-    # --- 其他辅助 ---
-
-    def change_language(self, event=None):
-        new_lang = "zh" if self.lang_combo.get() == "中文" else "en"
-        if new_lang == self.lang: return
+    def change_language(self):
+        new_lang = "zh" if self.lang_combo.currentText() == "中文" else "en"
+        if new_lang == self.lang:
+            return
         self.lang = new_lang
         self.update_config("lang", self.lang)
-        self.refresh_text()
 
-    def refresh_text(self):
+        # propagate language to core modules
+        try:
+            self.downloader.set_language(self.lang)
+            self.installer.set_language(self.lang)
+        except Exception:
+            pass
+
+        # refresh visible texts only (do NOT rebuild layout)
+        self._refresh_text()
+
+    def _refresh_text(self):
+        """Refresh all visible texts (v6multi-compatible, no layout rebuild)."""
         t = self.get_current_trans()
-        self.root.title(f"{t['title']} ({self.system})")
-        self.btn_open.config(text=t["btn_open_dir"])
-        self.install_btn.config(text=t["btn_fix_dep"])
-        self.lbl_engine.config(text=t["label_engine"])
-        if self.download_controller:
-            self.download_btn.config(text=t["btn_stop"])
-        else:
-            self.download_btn.config(text=t["btn_start"])
-        self.log(f"\n>>> Language switched to {self.lang}\n", "info")
+        display_name = "macOS" if self.system == "Darwin" else self.system
 
-    def toggle_engine_ui(self):
-        if self.engine_var.get() == "native":
-            self.thread_combo.config(state="disabled")
+        # window title
+        self.setWindowTitle(f"{t['title']} ({display_name})")
+
+        # top bar
+        self.btn_open.setText(t["btn_open_dir"])
+        self.btn_clear.setText(t["btn_clear_log"])
+        self.install_btn.setText(t["btn_fix_dep"])
+
+        # language combo (silent)
+        self.lang_combo.blockSignals(True)
+        self.lang_combo.setCurrentIndex(0 if self.lang == "en" else 1)
+        self.lang_combo.blockSignals(False)
+
+        # group boxes
+        self.url_group.setTitle(t["frame_url"])
+        self.tools_group.setTitle(t["frame_tools"])
+
+        # cookie / local file
+        self.rb_guest.setText(t["mode_guest"])
+        self.rb_file.setText(t["mode_local_file"])
+        self.btn_sel_cookie.setText(t["btn_select"])
+        if not self.cookie_file_path:
+            self.file_label.setText(t["status_no_file"])
+
+        # cookie plugin button text and catcatch
+        if hasattr(self, "btn_cookie_plugin"):
+            self.btn_cookie_plugin.setText(
+                t.get("btn_cookie_export", "Get cookies.txt")
+            )
+        if hasattr(self, "btn_catcatch"):
+            self.btn_catcatch.setText(
+                t.get("btn_catcatch", "Get m3u8 (CatCatch)")
+            )
+
+        # engine / threads
+        self.lbl_engine.setText(t["label_engine"])
+        self.lbl_threads.setText(t.get("label_threads", "Threads:"))
+
+        self.engine_combo.blockSignals(True)
+        current_index = self.engine_combo.currentIndex()
+        self.engine_combo.clear()
+        self.engine_combo.addItems([
+            t["engine_native"],
+            t["engine_aria2"],
+            t["engine_re"],
+        ])
+        self.engine_combo.setCurrentIndex(current_index)
+        self.engine_combo.blockSignals(False)
+
+        # save path
+        self.lbl_save_path.setText(t["label_save_path"])
+        self.btn_path.setText(t["btn_change_path"])
+        self.path_label.setText(self.download_dir[-30:])
+
+        # log area
+        self.lbl_log.setText(t["label_log"])
+
+        # optional info
+        # log language switch once per change (avoid spam)
+        if getattr(self, "_last_lang_logged", None) != self.lang:
+            self._last_lang_logged = self.lang
+            try:
+                msg = t.get("log_language_switched")
+                if not msg:
+                    msg = ">>> Language switched to {}\n"
+                self.log_thread_safe(msg.format(self.lang), "info")
+            except Exception:
+                pass
+
+        # re-apply RE cookie disable after language refresh
+        is_re = self.engine_combo.currentIndex() == 2
+        for rb in [self.rb_chrome, self.rb_edge, self.rb_firefox, self.rb_safari]:
+            if rb.isVisible():
+                rb.setEnabled(not is_re)
+
+        # keep download button state consistent
+        if self.download_controller and self.download_controller._proc:
+            self.download_btn.setText(t["btn_stop"])
         else:
-            self.thread_combo.config(state="readonly")
+            self.download_btn.setText(t["btn_start"])
 
     def select_cookie_file(self):
-        f = filedialog.askopenfilename(filetypes=[("Text", "*.txt"), ("All", "*.*")])
+        f, _ = QFileDialog.getOpenFileName(self, "Select cookie file", os.path.expanduser("~"), "Text Files (*.txt)")
         if f:
             self.cookie_file_path = f
-            self.file_label.config(text=os.path.basename(f), foreground="#007AFF")
-            self.cookie_source.set("file")
+            self.file_label.setText(os.path.basename(f))
             self.update_config("cookie_path", f)
 
     def change_download_path(self):
-        d = filedialog.askdirectory()
+        d = QFileDialog.getExistingDirectory(self, "Select download folder", self.download_dir)
         if d:
             self.download_dir = d
-            self.path_label.config(text=d[-30:])
+            self.path_label.setText(d[-30:])
             self.update_config("download_dir", d)
 
     def restore_config_state(self):
+        """Restore UI state from saved config (cookie file, etc.)."""
         t = self.get_current_trans()
         if self.cookie_file_path and os.path.exists(self.cookie_file_path):
-            self.cookie_source.set("file")
-            self.file_label.config(text=os.path.basename(self.cookie_file_path), foreground="#007AFF")
-            self.log(t["log_load_cookie_ok"], "success")
-
-    def play_sound(self, success=True):
-        if self.system == "Darwin":
-            sound = "Glass" if success else "Basso"
-            os.system(f'afplay /System/Library/Sounds/{sound}.aiff')
-        elif self.system == "Windows":
+            # show loaded cookie file name
+            self.file_label.setText(os.path.basename(self.cookie_file_path))
+            self.file_label.setStyleSheet("color:#007AFF")
+            # optional log
             try:
-                import winsound
-                winsound.MessageBeep(winsound.MB_OK if success else winsound.MB_ICONHAND)
-            except:
+                self.log_thread_safe(t.get("log_load_cookie_ok", "Loaded previous cookie file."), "success")
+            except Exception:
                 pass
+
+    def open_cookie_plugin(self):
+        """
+        Open cookies.txt exporter for RE workflow.
+        """
+        import webbrowser
+
+        url = resolve_cookie_plugin_url(
+            browser=self.cookie_source,
+            system=self.system,
+            prefer="cookies_txt",
+        )
+
+        if not url:
+            self.log_thread_safe("No suitable cookies.txt exporter found for this browser.\n", "warning")
+            return
+
+        webbrowser.open(url)
+
+    # CatCatch is for capturing m3u8 URLs, NOT cookies
+    def open_catcatch(self):
+        """
+        Open CatCatch plugin page for capturing m3u8 URLs.
+        Independent from cookie export.
+        """
+        import webbrowser
+
+        url = resolve_cookie_plugin_url(
+            browser=self.cookie_source,
+            system=self.system,
+            prefer="catcatch",
+        )
+
+        if not url:
+            self.log_thread_safe("CatCatch is not available for this browser.\n", "warning")
+            return
+
+        webbrowser.open(url)

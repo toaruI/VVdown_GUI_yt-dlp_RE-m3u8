@@ -1,15 +1,16 @@
 # utils/platform_utils.py
+# Cross-platform helpers for filesystem, PATH setup, and command availability
 import os
-import platform
 import subprocess
 import sys
+from config.config import SYSTEM, IS_MAC, IS_WIN, IS_LINUX
 
 
 def get_base_path():
     """
-        返回程序的基础目录：
-        - 如果使用 PyInstaller 打包，返回 exe 所在目录
-        - 否则返回当前文件的父目录（即项目 package 目录）
+    Return the base directory of the application:
+    - If running as a PyInstaller frozen executable, return the directory of the executable
+    - Otherwise, return the directory of this file (project package root)
     """
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
@@ -18,24 +19,31 @@ def get_base_path():
 
 def setup_env_path():
     """
-        在 macOS 下把常见 Homebrew 路径加入 PATH，避免 GUI 启动时 PATH 不完整的问题。
-        这会直接改变 os.environ['PATH']，调用前请谨慎（或把结果传给子进程 env）。
+    On macOS, append common Homebrew paths to PATH.
+    This is necessary because GUI-launched apps often inherit a minimal PATH.
+
+    NOTE:
+    - This mutates os.environ['PATH'] globally
+    - Call with care, or pass PATH explicitly to subprocesses
     """
-    if platform.system() != "Darwin":
+    if not IS_MAC:
         return
     current_path = os.environ.get("PATH", "")
-    new_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
-    for add in new_paths:
-        if add not in current_path:
-            current_path += os.pathsep + add
+    extra_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
+
+    for p in extra_paths:
+        if p not in current_path:
+            current_path = current_path + os.pathsep + p
+
     os.environ["PATH"] = current_path
 
 
 def open_download_folder(path):
     """
-    :param path: where the download folder is located
-    :return: open or not
-    for opening the download folder
+    Open the given folder in the system file manager.
+
+    :param path: Target directory to open
+    :return: (success: bool, error_message: str)
     """
     if not os.path.exists(path):
         try:
@@ -43,13 +51,13 @@ def open_download_folder(path):
         except:
             return False, f"Path not created: {path}"
 
-    system = platform.system()
     try:
-        if system == "Windows":
+        if IS_WIN:
             os.startfile(path)
-        elif system == "Darwin":
+        elif IS_MAC:
             subprocess.run(["open", path], check=True)
         else:
+            # Linux and other Unix-like systems
             subprocess.run(["xdg-open", path], check=True)
         return True, ""
     except Exception as e:
@@ -58,8 +66,10 @@ def open_download_folder(path):
 
 def is_cmd_available(cmd: str) -> bool:
     """
-        简单判断命令行工具是否可用（通过 `--version` 迅速探测）。
-        返回 True/False，调用方可据此决定是否提示安装/自动安装。
+    Check whether a command-line tool is available.
+
+    The check is performed by invoking `<cmd> --version` and suppressing output.
+    Returns True if the command can be executed, otherwise False.
     """
     if not cmd:
         return False
@@ -68,7 +78,8 @@ def is_cmd_available(cmd: str) -> bool:
             [cmd, "--version"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            check=False
+            check=False,
+            timeout=3
         )
         return True
     except Exception:
