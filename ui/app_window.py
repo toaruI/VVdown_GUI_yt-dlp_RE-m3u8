@@ -114,6 +114,42 @@ class MainWindow(QWidget):
     def get_current_trans(self):
         return TRANSLATIONS.get(self.lang, TRANSLATIONS["en"])
 
+    def _map_exception_to_user_message(self, exc: Exception) -> str:
+        """Translate core exceptions into user-friendly messages based on current UI language."""
+        text = str(exc).lower()
+        is_zh = self.lang == "zh"
+
+        # RE engine input errors
+        if "re engine only supports" in text or "m3u8" in text:
+            return (
+                "RE 引擎需要直接的 m3u8/mpd 链接，请对网页链接使用 yt-dlp。"
+                if is_zh
+                else "RE engine requires a direct m3u8/mpd URL. Please use yt-dlp."
+            )
+
+        # Dependency-related errors
+        if "not found" in text or "missing" in text:
+            return (
+                "缺少必要的依赖，请点击『修复依赖』。"
+                if is_zh
+                else "Required dependency not found. Please run Fix Dependencies."
+            )
+
+        # User cancellation or stop
+        if "stopped" in text or "cancel" in text:
+            return (
+                "下载已停止。"
+                if is_zh
+                else "Download stopped."
+            )
+
+        # Fallback
+        return (
+            "发生错误，请查看上方日志。"
+            if is_zh
+            else "An error occurred. Please check the log above."
+        )
+
     def update_config(self, key, value):
         self.config_data[key] = value
         save_user_config(self.config_data)
@@ -428,6 +464,19 @@ class MainWindow(QWidget):
             self.log_thread_safe(msg + "\n", "warning")
             return
 
+        # Pre-check: RE engine requires a direct m3u8/mpd URL (log-only, no modal)
+        engine_text = self.engine_combo.currentText().lower()
+        is_re = ("re" in engine_text)
+        if is_re:
+            ul = url.lower()
+            if not (ul.endswith('.m3u8') or ul.endswith('.mpd') or 'm3u8' in ul):
+                msg = t.get(
+                    "log_re_requires_m3u8",
+                    "RE engine requires a direct m3u8/mpd URL. Please use yt-dlp for webpage URLs."
+                )
+                self.log_thread_safe(msg + "\n", "warning")
+                return
+
         self.log_text.clear()
         self.download_btn.setText(t["btn_stop"])
 
@@ -442,7 +491,8 @@ class MainWindow(QWidget):
         try:
             self.download_controller = self.downloader.run_threaded(url, opts)
         except Exception as e:
-            self.log_thread_safe(str(e), "error")
+            msg = self._map_exception_to_user_message(e)
+            self.log_thread_safe(msg + "\n", "error")
             self.download_btn.setText(t["btn_start"])
             self.download_controller = None
             return
