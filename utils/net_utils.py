@@ -164,11 +164,16 @@ class ResourceProvider:
         def name(a: dict) -> str:
             return a.get("name", "").lower()
 
-        # Windows
+        # Windows: prefer latest win64 GPL builds (shared or static)
         if IS_WIN:
             for a in assets:
                 n = name(a)
-                if "win" in n and "gpl" in n and n.endswith(".zip"):
+                if (
+                    n.startswith("ffmpeg-")
+                    and "win64" in n
+                    and "gpl" in n
+                    and n.endswith(".zip")
+                ):
                     return self._mirror(a.get("browser_download_url"))
 
         # Deleted BtbN macOS blocks per instructions
