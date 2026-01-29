@@ -21,7 +21,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from config.config import IS_WIN
+from config.config import IS_WIN, IS_MAC, IS_LINUX, IS_ARM
 
 # ------------------------------
 # Region detection
@@ -159,51 +159,139 @@ class ResourceProvider:
         data = _github_api_get(GITHUB_API.format(repo=repo))
         assets = data.get("assets", [])
 
-        if IS_WIN:
-            url = _pick_asset(
-                assets,
-                keywords=["win", "gpl", "zip"],
-                any_of=["win64", "windows"],
-            )
-        else:
-            url = _pick_asset(
-                assets,
-                keywords=["gpl"],
-                any_of=["mac", "osx", "darwin", "apple"],
-            )
+        is_arm = IS_ARM
 
-        return self._mirror(url)
+        def name(a: dict) -> str:
+            return a.get("name", "").lower()
+
+        # Windows
+        if IS_WIN:
+            for a in assets:
+                n = name(a)
+                if "win" in n and "gpl" in n and n.endswith(".zip"):
+                    return self._mirror(a.get("browser_download_url"))
+
+        # Deleted BtbN macOS blocks per instructions
+
+        # macOS fallback: ffmpeg-static (single-file darwin binaries ONLY)
+        if IS_MAC:
+            repo = "eugeneware/ffmpeg-static"
+            try:
+                data = _github_api_get(GITHUB_API.format(repo=repo))
+                assets = data.get("assets", [])
+
+                def is_valid_macos_ffmpeg(a: dict) -> bool:
+                    name = a.get("name", "").lower()
+                    size = a.get("size", 0)
+                    return (
+                            name.startswith("ffmpeg-darwin-")
+                            and "." not in name
+                            and size > 5_000_000
+                    )
+
+                # Prefer exact architecture
+                if IS_ARM:
+                    for a in assets:
+                        if is_valid_macos_ffmpeg(a) and "arm64" in a.get("name", "").lower():
+                            return self._mirror(a.get("browser_download_url"))
+                else:
+                    for a in assets:
+                        n = a.get("name", "").lower()
+                        if is_valid_macos_ffmpeg(a) and ("x64" in n or "x86_64" in n):
+                            return self._mirror(a.get("browser_download_url"))
+
+                # Fallback: any valid macOS ffmpeg binary
+                for a in assets:
+                    if is_valid_macos_ffmpeg(a):
+                        return self._mirror(a.get("browser_download_url"))
+            except Exception:
+                pass
+
+        return ""
 
     def _aria2_url(self) -> str:
         repo = "aria2/aria2"
         data = _github_api_get(GITHUB_API.format(repo=repo))
         assets = data.get("assets", [])
 
-        if IS_WIN:
-            url = _pick_asset(
-                assets,
-                keywords=["win"],
-                any_of=["64", "x64"],
-            )
-        else:
-            # macOS builds are inconsistent; try multiple patterns
-            url = _pick_asset(
-                assets,
-                keywords=[],
-                any_of=["darwin", "mac", "osx"],
-            )
+        # macOS: aria2 is optional (no stable official binary)
+        if IS_MAC:
+            return ""
 
-        return self._mirror(url)
+        is_arm = IS_ARM
+
+        def _name(a: dict) -> str:
+            return a.get("name", "").lower()
+
+        # Windows: prefer win64 zip
+        if IS_WIN:
+            for a in assets:
+                n = _name(a)
+                if ("win" in n and ("64" in n or "x64" in n) and n.endswith('.zip')):
+                    return self._mirror(a.get('browser_download_url'))
+
+        # macOS Apple Silicon (arm64)
+        if IS_MAC:
+            if is_arm:
+                for a in assets:
+                    n = _name(a)
+                    if (
+                        ("darwin" in n or "mac" in n or "osx" in n)
+                        and ("arm64" in n or "aarch64" in n)
+                        and "linux" not in n
+                    ):
+                        return self._mirror(a.get('browser_download_url'))
+
+            # macOS Intel (x86_64)
+            for a in assets:
+                n = _name(a)
+                if (
+                    ("darwin" in n or "mac" in n or "osx" in n)
+                    and ("x86_64" in n or "amd64" in n or "intel" in n or not is_arm)
+                    and "linux" not in n
+                ):
+                    return self._mirror(a.get('browser_download_url'))
+
+        # Linux fallback
+        if IS_LINUX:
+            for a in assets:
+                n = _name(a)
+                if "linux" in n and not n.endswith('.exe'):
+                    return self._mirror(a.get('browser_download_url'))
+
+        return ""
 
     def _re_url(self) -> str:
         repo = "nilaoda/N_m3u8DL-RE"
         data = _github_api_get(GITHUB_API.format(repo=repo))
         assets = data.get("assets", [])
+
+        def _name(a: dict) -> str:
+            return a.get("name", "").lower()
+
+        # Windows: only .exe
         if IS_WIN:
-            url = _pick_asset(assets, keywords=["exe"])
-        else:
-            url = _pick_asset(assets, keywords=["linux"]) or _pick_asset(assets, keywords=["mac"]) or _pick_asset(assets, keywords=["n_m3u8dl-re"])
-        return self._mirror(url)
+            for a in assets:
+                if _name(a).endswith('.exe'):
+                    return self._mirror(a.get('browser_download_url'))
+
+        # macOS: prefer mac/darwin/osx, explicitly exclude linux
+        for a in assets:
+            n = _name(a)
+            if (
+                ('mac' in n or 'darwin' in n or 'osx' in n)
+                and 'linux' not in n
+                and not n.endswith('.exe')
+            ):
+                return self._mirror(a.get('browser_download_url'))
+
+        # Linux fallback
+        for a in assets:
+            n = _name(a)
+            if 'linux' in n and not n.endswith('.exe'):
+                return self._mirror(a.get('browser_download_url'))
+
+        return ""
 
     # --------------------------
     # Helpers

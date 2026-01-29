@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QMessageBox, QApplication
 )
 
-from config.config import TRANSLATIONS, SYSTEM, load_user_config, save_user_config
+from config.config import TRANSLATIONS, SYSTEM, load_user_config, save_user_config, IS_MAC
 from core.downloader import DownloaderEngine
 from core.installer import DependencyInstaller
 from utils import setup_env_path, open_download_folder, resolve_cookie_plugin_url
@@ -90,6 +90,9 @@ class MainWindow(QWidget):
             translations=TRANSLATIONS,
             lang=self.lang,
         )
+
+        # cache dependency availability (updated on startup)
+        self._aria2_available = True
 
         self.threadpool = QThreadPool.globalInstance()
 
@@ -450,10 +453,24 @@ class MainWindow(QWidget):
             try:
                 status = self.installer.check_status()
                 t = self.get_current_trans()
+
                 if not status.get("yt-dlp"):
                     self.log_thread_safe(t.get("log_check_yt_fail", "yt-dlp not found"), "warning")
+
                 if not status.get("ffmpeg"):
                     self.log_thread_safe(t.get("log_check_re_warning", "ffmpeg not found"), "warning")
+
+                # macOS: aria2 is optional; hide engine if unavailable
+                if IS_MAC and not status.get("aria2"):
+                    self._aria2_available = False
+                    def hide_aria2():
+                        # aria2 is at index 1: [native, aria2, re]
+                        if self.engine_combo.count() >= 3:
+                            self.engine_combo.removeItem(1)
+                    QTimer.singleShot(0, hide_aria2)
+                else:
+                    self._aria2_available = True
+
             except Exception:
                 pass
         self.threadpool.start(task)
@@ -521,11 +538,11 @@ class MainWindow(QWidget):
         self.engine_combo.blockSignals(True)
         current_index = self.engine_combo.currentIndex()
         self.engine_combo.clear()
-        self.engine_combo.addItems([
-            t["engine_native"],
-            t["engine_aria2"],
-            t["engine_re"],
-        ])
+        engines = [t["engine_native"]]
+        if not IS_MAC or getattr(self, "_aria2_available", True):
+            engines.append(t["engine_aria2"])
+        engines.append(t["engine_re"])
+        self.engine_combo.addItems(engines)
         self.engine_combo.setCurrentIndex(current_index)
         self.engine_combo.blockSignals(False)
 

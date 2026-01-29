@@ -128,6 +128,20 @@ VVDown 不会修改、分发或打包上述插件，其版权及许可证均归�
   Browser cookies may be used directly for supported engines and extractors.  
   
   在 macOS / Linux 平台上，部分引擎和 extractor 支持直接使用浏览器 Cookies。
+- 
+- **aria2 on macOS**  
+  On macOS, aria2 is treated as an optional dependency. The GUI can detect an existing `aria2c` binary
+  (for example, installed via Homebrew), but will not automatically install aria2 on macOS.  
+  
+  在 macOS 平台上，aria2 被视为可选依赖。GUI 可以识别系统中已有的 `aria2c`
+  （例如通过 Homebrew 安装），但不会在 macOS 下自动安装 aria2。
+
+  Recommended installation via Homebrew:  
+  推荐使用 Homebrew 安装：
+
+  ```bash
+  brew install aria2
+  ```
 
 - This GUI currently uses the default configuration of yt-dlp, FFmpeg, and N_m3u8DL-RE.  
   当前 GUI 使用 yt-dlp、FFmpeg 以及 N_m3u8DL-RE 的默认配置。
@@ -212,6 +226,8 @@ No system-level installation is required.
   高性能多连接下载引擎
 - Suitable for large files  
   适合大文件下载
+- On macOS, aria2 is optional and typically installed via Homebrew rather than bundled automatically.  
+  在 macOS 平台上，aria2 为可选组件，通常通过 Homebrew 安装，而不是由程序自动安装。
 
 ### N_m3u8DL-RE
 

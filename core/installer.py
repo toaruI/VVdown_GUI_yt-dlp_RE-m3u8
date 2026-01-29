@@ -198,15 +198,29 @@ class DependencyInstaller:
                 pass
             return False
 
-        installed = self._extract_archive_to_bin(tmp, expected_name="ffmpeg")
-        if installed:
-            installed = self._finalize_ffmpeg_binary()
+        # ffmpeg-static on macOS provides a raw executable, not an archive
+        if IS_MAC and not (zipfile.is_zipfile(tmp) or tarfile.is_tarfile(tmp)):
+            try:
+                shutil.move(tmp, target)
+                if not IS_WIN:
+                    os.chmod(target, 0o755)
+                installed = True
+            except Exception as e:
+                _log_raw(self.log, f"Failed to place ffmpeg binary: {e}\n", "warning")
+                installed = False
+        else:
+            installed = self._extract_archive_to_bin(tmp, expected_name="ffmpeg")
+            if installed:
+                installed = self._finalize_ffmpeg_binary()
+
         try:
-            os.remove(tmp)
+            if os.path.exists(tmp):
+                os.remove(tmp)
         except Exception:
             pass
+
         if not installed:
-            _log_raw(self.log, "ffmpeg extraction failed.\n", "warning")
+            _log_raw(self.log, "ffmpeg installation failed.\n", "warning")
             return False
         return True
 

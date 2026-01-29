@@ -68,6 +68,15 @@ SYSTEM = platform.system()  # Darwin / Windows / Linux
 IS_MAC = SYSTEM == OS_DARWIN
 IS_WIN = SYSTEM == OS_WINDOWS
 IS_LINUX = SYSTEM == OS_LINUX
+
+# Architecture detection
+# NOTE:
+# platform.machine() is only called here.
+# Other modules should import IS_ARM / IS_X64 from this file.
+MACHINE = platform.machine().lower()
+
+IS_ARM = MACHINE in ("arm64", "aarch64")
+IS_X64 = MACHINE in ("x86_64", "amd64")
 SUPPORTED_SYSTEMS = {"Darwin", "Windows", "Linux"}
 
 # =========================================

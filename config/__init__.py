@@ -8,6 +8,7 @@ from .config import (
     IS_MAC,
     IS_WIN,
     IS_LINUX,
+    IS_ARM,
     load_user_config,
     save_user_config
 )
