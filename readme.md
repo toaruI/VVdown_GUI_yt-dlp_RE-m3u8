@@ -20,8 +20,8 @@ VVDown 是一个跨平台的视频下载工具，注重稳定性、可维护性�
 
 - Local bin-based dependency management  
   本地 bin 目录依赖管理：
-  - No Homebrew / apt / yum required  
-    不需要 Homebrew、apt 或 yum
+  - No mandatory Homebrew / apt / yum dependency  
+    不强制依赖 Homebrew、apt 或 yum
   - No modification to system PATH  
     不修改系统环境变量
   - Same behavior for source and packaged builds  
@@ -136,7 +136,7 @@ VVDown 不会修改、分发或打包上述插件，其版权及许可证均归�
 
 - **aria2 on macOS**  
   On macOS, aria2 is treated as an optional dependency. The GUI can detect an existing `aria2c` binary
-  (for example, installed via Homebrew), but will not automatically install aria2 on macOS.  
+  (commonly installed via Homebrew), but will not automatically install aria2 on macOS.  
   
   在 macOS 平台上，aria2 被视为可选依赖。GUI 可以识别系统中已有的 `aria2c`
   （例如通过 Homebrew 安装），但不会在 macOS 下自动安装 aria2。
@@ -156,6 +156,13 @@ VVDown 不会修改、分发或打包上述插件，其版权及许可证均归�
 
 - The current focus is correctness, stability, and a clean architecture.  
   当前版本的重点是正确性、稳定性以及清晰的工程结构。
+
+Note:
+While VVDown does not require Homebrew to function, Homebrew is a convenient and recommended way to install
+optional tools such as `aria2` on macOS.
+
+说明：
+VVDown 本身不依赖 Homebrew 才能运行，但在 macOS 平台上，Homebrew 是安装如 `aria2` 等可选工具的推荐方式。
 
 ---
 
@@ -196,8 +203,8 @@ On first launch, click **Fix Dependencies**.
   - aria2
   - N_m3u8DL-RE
 
-No system-level installation is required.  
-无需任何系统级安装。
+No mandatory system-level installation is required.  
+在 macOS 平台上，不强制要求系统级安装。
 
 ---
 
