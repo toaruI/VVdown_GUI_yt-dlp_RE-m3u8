@@ -179,15 +179,15 @@ COOKIE_PLUGIN_URLS = {
     # Export cookies.txt for downloader / RE usage
     "cookies_txt": {
         "chrome": "https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc",
-        "edge": "https://microsoftedge.microsoft.com/addons/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc",
-        "firefox": "https://addons.mozilla.org/firefox/addon/cookies-txt/",
+        "edge": "https://microsoftedge.microsoft.com/addons/detail/get-cookies-txt/ebbdheafhjncoeidpdijmfmkicnejelp",
+        "firefox": "https://addons.mozilla.org/firefox/addon/get-cookies-txt-locally/",
         # Safari has no reliable cookies.txt exporter
-        "fallback": "https://github.com/rotemdan/ExportCookies",
+        "fallback": "https://github.com/kairi003/Get-cookies.txt-Locally",
     },
     # Network capture helper (alternative path)
     "catcatch": {
         "chrome": "https://chromewebstore.google.com/webstore/detail/cat-catch/jfedfbgedapdagkghmgibemcoggfppbb",
-        "edge": "https://microsoftedge.microsoft.com/addons/detail/cat-catch/ieegpgndldpbhlkfdhcebecfngbpjnaa",
+        "edge": "https://microsoftedge.microsoft.com/addons/detail/oohmdefbjalncfplafanlagojlakmjci",
         "firefox": "https://addons.mozilla.org/firefox/addon/cat-catch/",
         "fallback": "https://github.com/xifangczy/cat-catch",
     },

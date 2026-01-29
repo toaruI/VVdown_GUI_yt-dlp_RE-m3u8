@@ -269,13 +269,15 @@ class ResourceProvider:
         def _name(a: dict) -> str:
             return a.get("name", "").lower()
 
-        # Windows: RE is distributed as ZIP archives; stop after matching
+        # Windows: RE is distributed as ZIP archives
         if IS_WIN:
             for a in assets:
                 n = _name(a)
-                if IS_ARM and n.endswith('win-arm64.zip'):
+                # Windows ARM64
+                if IS_ARM and 'win-arm64' in n and n.endswith('.zip'):
                     return self._mirror(a.get('browser_download_url'))
-                if not IS_ARM and n.endswith('win-x64.zip'):
+                # Windows x64
+                if (not IS_ARM) and 'win-x64' in n and n.endswith('.zip'):
                     return self._mirror(a.get('browser_download_url'))
             return ""
 

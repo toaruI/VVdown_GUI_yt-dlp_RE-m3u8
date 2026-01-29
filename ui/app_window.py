@@ -250,6 +250,13 @@ class MainWindow(QWidget):
 
         root.addWidget(self.tools_group)
 
+        # Windows: slightly increase button font size for better readability
+        if self.system == "Windows":
+            for btn in self.findChildren(QPushButton):
+                btn.setStyleSheet(
+                    btn.styleSheet() + " QPushButton { font-size: 13px; }"
+                )
+
         # controls
         ctrl = QHBoxLayout()
         ev = QVBoxLayout()
