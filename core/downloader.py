@@ -193,6 +193,10 @@ class DownloaderEngine:
         cmd = []
         cookie_header = None
 
+        def _is_stream_url(u: str) -> bool:
+            ul = u.lower()
+            return ul.endswith('.m3u8') or ul.endswith('.mpd') or 'm3u8' in ul
+
         # First-run bootstrap: always try browser cookies if no cookie file exists
         if not cookie_path:
             # choose a reasonable browser source
@@ -201,6 +205,9 @@ class DownloaderEngine:
 
         if engine == "re":
             # N_m3u8DL-RE
+            # RE only supports stream URLs
+            if not _is_stream_url(url):
+                raise ValueError("RE engine only supports stream URLs (m3u8/mpd). Use yt-dlp for webpage URLs.")
             re_exe = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
             re_path = os.path.join(BIN_DIR, re_exe)
             exe_cmd = re_path if os.path.isfile(re_path) else "N_m3u8DL-RE"
@@ -290,7 +297,7 @@ class DownloaderEngine:
 
                 if cookie_str:
                     _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Using cookies.txt (auto)\n"), "success")
-                    cmd.extend(["--header", f"Cookie: {cookie_str}"])
+                    cmd.extend(["--add-header", f"Cookie: {cookie_str}"])
                 else:
                     # Fallback to browser cookies
                     if cookie_src in ["chrome", "edge", "firefox", "safari"]:

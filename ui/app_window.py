@@ -105,6 +105,9 @@ class MainWindow(QWidget):
         self.download_finished_signal.connect(self._handle_download_done)
         self.installer_finished_signal.connect(self._on_installer_finished)
 
+        # Ensure download button state is correct on startup
+        self._update_download_enabled()
+
     # ---------------- helpers ----------------
     def get_current_trans(self):
         return TRANSLATIONS.get(self.lang, TRANSLATIONS["en"])
@@ -112,6 +115,36 @@ class MainWindow(QWidget):
     def update_config(self, key, value):
         self.config_data[key] = value
         save_user_config(self.config_data)
+
+    def _update_download_enabled(self):
+        """Disable download on Windows when browser cookies are selected."""
+        is_windows = self.system == "Windows"
+        using_browser_cookie = self.cookie_source in {"chrome", "edge", "firefox", "safari"}
+
+        if is_windows and using_browser_cookie:
+            # Disable download to prevent invalid operation
+            self.download_btn.setEnabled(False)
+            # Bilingual hint (interactive UI + log)
+            msg_en = (
+                "Browser cookies are not supported on Windows.\n"
+                "Please export cookies.txt via a browser plugin and select 'Local Cookie File'."
+            )
+            msg_zh = (
+                "Windows 平台不支持直接使用浏览器 Cookie。\n"
+                "请通过浏览器插件导出 cookies.txt，并选择『本地 Cookie 文件』模式。"
+            )
+            # Show hint once per state change
+            if getattr(self, "_win_cookie_warned", False) is False:
+                self._win_cookie_warned = True
+                try:
+                    QMessageBox.information(self, "Hint", msg_en + "\n\n" + msg_zh)
+                except Exception:
+                    pass
+                self.log_thread_safe(msg_en + "\n" + msg_zh + "\n", "warning")
+        else:
+            # Re-enable download
+            self.download_btn.setEnabled(True)
+            self._win_cookie_warned = False
 
     def log_thread_safe(self, text, tag=None):
         self.log_signal.emit(text, tag or "info")
@@ -344,6 +377,7 @@ class MainWindow(QWidget):
                 t.get("log_mode_browser", "Mode: {} Cookie").format(source.capitalize()),
                 "info",
             )
+        self._update_download_enabled()
 
     def toggle_engine_ui(self):
         is_re = self.engine_combo.currentIndex() == 2
@@ -584,6 +618,9 @@ class MainWindow(QWidget):
             self.download_btn.setText(t["btn_stop"])
         else:
             self.download_btn.setText(t["btn_start"])
+
+        # Update download button enabled state after language refresh
+        self._update_download_enabled()
 
     def select_cookie_file(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select cookie file", os.path.expanduser("~"), "Text Files (*.txt)")
