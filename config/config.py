@@ -15,7 +15,12 @@ def get_base_path():
     - 如果是脚本运行，__file__ 位于 config/config.py，需要向上退两级
     """
     if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
+        exe_dir = os.path.dirname(sys.executable)
+        # macOS app bundle: resources are under Contents/Resources
+        if sys.platform == 'darwin':
+            return os.path.abspath(os.path.join(exe_dir, '..', 'Resources'))
+        # Windows / Linux: use executable directory
+        return exe_dir
     else:
         # 当前文件: .../UniversalDownloader/config/config.py
         # 父目录: .../UniversalDownloader/config
@@ -26,9 +31,11 @@ def get_base_path():
 def get_config_path():
     """获取 config 文件夹本身的路径"""
     if getattr(sys, 'frozen', False):
-        # 打包后，建议把 config 放在 exe 同级或者内部资源里
-        # 这里假设打包时 config 文件夹被释放到了 tmp 或者 exe 同级
-        return os.path.join(os.path.dirname(sys.executable), "config")
+        # PyInstaller runtime:
+        # macOS: Contents/Resources/config
+        # Windows/Linux: <exe_dir>/config
+        base = get_base_path()
+        return os.path.join(base, "config")
     else:
         return os.path.dirname(os.path.abspath(__file__))
 
@@ -89,6 +96,12 @@ _FALLBACK_TRANSLATIONS = {
         "title": "通用下载器 Pro (Fallback)",
         "btn_start": "开始下载",
         "btn_stop": "停止下载",
+        "btn_open_dir": "打开目录",
+        "btn_fix_dep": "修复依赖",
+        "btn_fix_dep_running": "修复中",
+        "engine_native": "内置",
+        "engine_aria2": "aria2",
+        "engine_re": "RE",
         "msg_error": "配置文件丢失",
         "label_log": "日志"
     },
@@ -96,6 +109,12 @@ _FALLBACK_TRANSLATIONS = {
         "title": "Universal Downloader Pro (Fallback)",
         "btn_start": "Start Download",
         "btn_stop": "Stop Download",
+        "btn_open_dir": "Open Folder",
+        "btn_fix_dep": "Fix Dependencies",
+        "btn_fix_dep_running": "Fixing",
+        "engine_native": "Native",
+        "engine_aria2": "aria2",
+        "engine_re": "RE",
         "msg_error": "Config Missing",
         "label_log": "Logs"
     }
