@@ -172,6 +172,17 @@ class ResourceProvider:
                     n.startswith("ffmpeg-")
                     and "win64" in n
                     and "gpl" in n
+                    and "shared" not in n
+                    and n.endswith(".zip")
+                ):
+                    return self._mirror(a.get("browser_download_url"))
+            for a in assets:
+                n = name(a)
+                if (
+                    n.startswith("ffmpeg-")
+                    and "win64" in n
+                    and "gpl" in n
+                    and "static" in n
                     and n.endswith(".zip")
                 ):
                     return self._mirror(a.get("browser_download_url"))

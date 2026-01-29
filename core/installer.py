@@ -210,23 +210,25 @@ class DependencyInstaller:
                 _log_raw(self.log, f"Failed to place ffmpeg binary: {e}\n", "warning")
                 installed = False
         else:
-            # Windows ffmpeg ZIP: explicitly extract ffmpeg.exe
+            # Windows ffmpeg ZIP: extract ffmpeg.exe AND required DLLs from the bin/ directory
             if IS_WIN and zipfile.is_zipfile(tmp):
                 try:
                     with zipfile.ZipFile(tmp, 'r') as z:
-                        exe_member = None
-                        for n in z.namelist():
-                            if n.lower().endswith('ffmpeg.exe'):
-                                exe_member = n
-                                break
-                        if not exe_member:
-                            raise RuntimeError('ffmpeg.exe not found in ZIP')
-                        out_path = os.path.join(BIN_DIR, 'ffmpeg.exe')
-                        with open(out_path, 'wb') as f:
-                            f.write(z.read(exe_member))
+                        members = z.namelist()
+                        extracted_any = False
+                        for m in members:
+                            lm = m.lower()
+                            # BtbN ZIP layout: ffmpeg-*/bin/ffmpeg.exe + *.dll
+                            if '/bin/' in lm and (lm.endswith('ffmpeg.exe') or lm.endswith('.dll')):
+                                out_path = os.path.join(BIN_DIR, os.path.basename(m))
+                                with open(out_path, 'wb') as f:
+                                    f.write(z.read(m))
+                                extracted_any = True
+                        if not extracted_any:
+                            raise RuntimeError('ffmpeg.exe or required DLLs not found in ZIP')
                     installed = True
                 except Exception as e:
-                    _log_raw(self.log, f"Failed to extract ffmpeg.exe: {e}\n", "warning")
+                    _log_raw(self.log, f"Failed to extract ffmpeg (exe + dlls): {e}\n", "warning")
                     installed = False
             else:
                 installed = self._extract_archive_to_bin(tmp, expected_name="ffmpeg")
