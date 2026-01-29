@@ -128,7 +128,12 @@ VVDown 不会修改、分发或打包上述插件，其版权及许可证均归�
   Browser cookies may be used directly for supported engines and extractors.  
   
   在 macOS / Linux 平台上，部分引擎和 extractor 支持直接使用浏览器 Cookies。
-- 
+
+- **FFmpeg on macOS**  
+  On macOS, FFmpeg is provided via standalone builds from the `ffmpeg-static` project.  
+  
+  在 macOS 平台上，FFmpeg 使用 `ffmpeg-static` 项目提供的独立可执行文件。
+
 - **aria2 on macOS**  
   On macOS, aria2 is treated as an optional dependency. The GUI can detect an existing `aria2c` binary
   (for example, installed via Homebrew), but will not automatically install aria2 on macOS.  
@@ -256,8 +261,10 @@ This project is built on top of the following open-source projects:
   https://github.com/nilaoda/N_m3u8DL-RE
 
 - FFmpeg  
-  https://ffmpeg.org  
-  (static builds provided by BtbN)
+  https://ffmpeg.org
+
+- ffmpeg-static (macOS standalone builds)  
+  https://github.com/eugeneware/ffmpeg-static
 
 - Qt / PySide6  
   https://www.qt.io  
