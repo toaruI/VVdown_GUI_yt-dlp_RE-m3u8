@@ -269,7 +269,7 @@ class ResourceProvider:
         def _name(a: dict) -> str:
             return a.get("name", "").lower()
 
-        # Windows: only .exe
+        # Windows: RE is distributed as ZIP archives; stop after matching
         if IS_WIN:
             for a in assets:
                 n = _name(a)
@@ -277,16 +277,18 @@ class ResourceProvider:
                     return self._mirror(a.get('browser_download_url'))
                 if not IS_ARM and n.endswith('win-x64.zip'):
                     return self._mirror(a.get('browser_download_url'))
+            return ""
 
         # macOS: prefer mac/darwin/osx, explicitly exclude linux
-        for a in assets:
-            n = _name(a)
-            if (
-                ('mac' in n or 'darwin' in n or 'osx' in n)
-                and 'linux' not in n
-                and not n.endswith('.exe')
-            ):
-                return self._mirror(a.get('browser_download_url'))
+        if IS_MAC:
+            for a in assets:
+                n = _name(a)
+                if (
+                    ('mac' in n or 'darwin' in n or 'osx' in n)
+                    and 'linux' not in n
+                    and not n.endswith('.exe')
+                ):
+                    return self._mirror(a.get('browser_download_url'))
 
         # Linux fallback
         # Do NOT auto-download on Linux: upstream releases are source/build archives
