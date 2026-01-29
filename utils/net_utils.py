@@ -272,7 +272,10 @@ class ResourceProvider:
         # Windows: only .exe
         if IS_WIN:
             for a in assets:
-                if _name(a).endswith('.exe'):
+                n = _name(a)
+                if IS_ARM and n.endswith('win-arm64.zip'):
+                    return self._mirror(a.get('browser_download_url'))
+                if not IS_ARM and n.endswith('win-x64.zip'):
                     return self._mirror(a.get('browser_download_url'))
 
         # macOS: prefer mac/darwin/osx, explicitly exclude linux
@@ -286,10 +289,8 @@ class ResourceProvider:
                 return self._mirror(a.get('browser_download_url'))
 
         # Linux fallback
-        for a in assets:
-            n = _name(a)
-            if 'linux' in n and not n.endswith('.exe'):
-                return self._mirror(a.get('browser_download_url'))
+        # Do NOT auto-download on Linux: upstream releases are source/build archives
+        # Users should install via system package manager or provide binaries manually
 
         return ""
 

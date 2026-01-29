@@ -198,6 +198,7 @@ class DependencyInstaller:
                 pass
             return False
 
+        installed = False
         # ffmpeg-static on macOS provides a raw executable, not an archive
         if IS_MAC and not (zipfile.is_zipfile(tmp) or tarfile.is_tarfile(tmp)):
             try:
@@ -209,9 +210,28 @@ class DependencyInstaller:
                 _log_raw(self.log, f"Failed to place ffmpeg binary: {e}\n", "warning")
                 installed = False
         else:
-            installed = self._extract_archive_to_bin(tmp, expected_name="ffmpeg")
-            if installed:
-                installed = self._finalize_ffmpeg_binary()
+            # Windows ffmpeg ZIP: explicitly extract ffmpeg.exe
+            if IS_WIN and zipfile.is_zipfile(tmp):
+                try:
+                    with zipfile.ZipFile(tmp, 'r') as z:
+                        exe_member = None
+                        for n in z.namelist():
+                            if n.lower().endswith('ffmpeg.exe'):
+                                exe_member = n
+                                break
+                        if not exe_member:
+                            raise RuntimeError('ffmpeg.exe not found in ZIP')
+                        out_path = os.path.join(BIN_DIR, 'ffmpeg.exe')
+                        with open(out_path, 'wb') as f:
+                            f.write(z.read(exe_member))
+                    installed = True
+                except Exception as e:
+                    _log_raw(self.log, f"Failed to extract ffmpeg.exe: {e}\n", "warning")
+                    installed = False
+            else:
+                installed = self._extract_archive_to_bin(tmp, expected_name="ffmpeg")
+                if installed:
+                    installed = self._finalize_ffmpeg_binary()
 
         try:
             if os.path.exists(tmp):
