@@ -1,8 +1,6 @@
 # core/installer.py
 import os
 import shutil
-import subprocess
-import sys
 import tarfile
 import threading
 import time
@@ -11,8 +9,8 @@ import zipfile
 from typing import Optional, Callable
 
 from config import BIN_DIR
-from config.config import SYSTEM, IS_MAC, IS_WIN, IS_LINUX
-from utils import ResourceProvider, is_cmd_available
+from config.config import SYSTEM, IS_MAC, IS_WIN
+from utils import ResourceProvider
 
 LogCb = Callable[[str, Optional[str]], None]
 
@@ -25,6 +23,7 @@ def _safe_log(log_cb: LogCb, text: str, tag: Optional[str] = None):
             print(text)
         except Exception:
             pass
+
 
 # Raw log helper: logs plain text, bypassing i18n templates
 def _log_raw(log_cb: LogCb, text: str, tag: Optional[str] = None):
@@ -66,7 +65,8 @@ class InstallController:
 
 
 class DependencyInstaller:
-    def __init__(self, log_callback: LogCb, translations: Optional[dict] = None, lang: str = "en", is_cn_mode: bool = False):
+    def __init__(self, log_callback: LogCb, translations: Optional[dict] = None, lang: str = "en",
+                 is_cn_mode: bool = False):
         self.log = log_callback
         self.translations = translations or {}
         self.lang = lang
@@ -302,8 +302,6 @@ class DependencyInstaller:
                 pass
             return False
 
-
-
     # ---------------------------
     # Helpers: download, extract
     # ---------------------------
@@ -415,7 +413,8 @@ class DependencyInstaller:
                                 elapsed = time.time() - start
                                 speed = downloaded / 1024 / max(elapsed, 0.1)
                                 now = time.time()
-                                if not hasattr(self, "_last_progress_log") or now - getattr(self, "_last_progress_log") > 0.5:
+                                if not hasattr(self, "_last_progress_log") or now - getattr(self,
+                                                                                            "_last_progress_log") > 0.5:
                                     self._last_progress_log = now
                                     _log_raw(
                                         self.log,
@@ -440,6 +439,7 @@ class DependencyInstaller:
         return False
 
         # (EXTRACTION MOVED TO _extract_archive_to_bin)
+
     def _ensure_aria2(self, controller: Optional[InstallController] = None) -> bool:
         name = "aria2c.exe" if IS_WIN else "aria2c"
         target = os.path.join(BIN_DIR, name)
@@ -479,13 +479,44 @@ class DependencyInstaller:
     # Status check
     # ---------------------------
     def check_status(self) -> dict:
-        return {
-            "yt-dlp": os.path.exists(os.path.join(BIN_DIR, "yt-dlp.exe" if IS_WIN else "yt-dlp")),
-            "ffmpeg": os.path.exists(os.path.join(BIN_DIR, "ffmpeg.exe" if IS_WIN else "ffmpeg")),
-            "aria2": os.path.exists(os.path.join(BIN_DIR, "aria2c.exe" if IS_WIN else "aria2c")),
-            "re": os.path.exists(os.path.join(BIN_DIR, "N_m3u8DL-RE.exe" if IS_WIN else "N_m3u8DL-RE")),
-            "bin_dir": BIN_DIR,
-        }
+        status = {}
+
+        # -------- yt-dlp --------
+        ytdlp_name = "yt-dlp.exe" if IS_WIN else "yt-dlp"
+        ytdlp_bin = os.path.join(BIN_DIR, ytdlp_name)
+        if os.path.exists(ytdlp_bin):
+            status["yt-dlp"] = True
+        else:
+            # fallback to system PATH (brew / winget / distro)
+            import shutil
+            status["yt-dlp"] = shutil.which("yt-dlp") is not None
+
+        # -------- ffmpeg --------
+        ffmpeg_name = "ffmpeg.exe" if IS_WIN else "ffmpeg"
+        ffmpeg_bin = os.path.join(BIN_DIR, ffmpeg_name)
+        if os.path.exists(ffmpeg_bin):
+            status["ffmpeg"] = True
+        else:
+            import shutil
+            status["ffmpeg"] = shutil.which("ffmpeg") is not None
+
+        # -------- aria2 --------
+        aria2_name = "aria2c.exe" if IS_WIN else "aria2c"
+        aria2_bin = os.path.join(BIN_DIR, aria2_name)
+        if os.path.exists(aria2_bin):
+            status["aria2"] = True
+        else:
+            import shutil
+            status["aria2"] = shutil.which("aria2c") is not None
+
+        # -------- N_m3u8DL-RE --------
+        # RE is only supported via local bin (no package manager fallback)
+        re_name = "N_m3u8DL-RE.exe" if IS_WIN else "N_m3u8DL-RE"
+        re_bin = os.path.join(BIN_DIR, re_name)
+        status["re"] = os.path.exists(re_bin)
+
+        status["bin_dir"] = BIN_DIR
+        return status
 
     def _finalize_ffmpeg_binary(self) -> bool:
         exe_name = "ffmpeg.exe" if IS_WIN else "ffmpeg"

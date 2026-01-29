@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QGroupBox, QRadioButton, QFileDialog, QPlainTextEdit,
-    QSpinBox, QMessageBox, QApplication
+    QSpinBox
 )
 
 from config.config import TRANSLATIONS, SYSTEM, load_user_config, save_user_config, IS_MAC
@@ -25,6 +25,7 @@ from .widgets import setup_styles, PasteFix
 
 class MainWindow(QWidget):
     installer_finished_signal = Signal(bool)
+
     def _reset_download_ui(self):
         """Reset UI state after download finishes or is stopped (v6 behavior)."""
         t = self.get_current_trans()
@@ -33,6 +34,7 @@ class MainWindow(QWidget):
         self.install_btn.setEnabled(True)
         self.btn_path.setEnabled(True)
         self.btn_sel_cookie.setEnabled(self.cookie_source == "file")
+
     log_signal = Signal(str, str)
     download_finished_signal = Signal(bool)
 
@@ -117,34 +119,41 @@ class MainWindow(QWidget):
         save_user_config(self.config_data)
 
     def _update_download_enabled(self):
-        """Disable download on Windows when browser cookies are selected."""
         is_windows = self.system == "Windows"
         using_browser_cookie = self.cookie_source in {"chrome", "edge", "firefox", "safari"}
+        using_local_file = self.cookie_source == "file"
+        local_file_missing = using_local_file and not self.cookie_file_path
 
+        # Case 1: Windows + browser cookie (unsupported)
         if is_windows and using_browser_cookie:
-            # Disable download to prevent invalid operation
             self.download_btn.setEnabled(False)
-            # Bilingual hint (interactive UI + log)
-            msg_en = (
-                "Browser cookies are not supported on Windows.\n"
-                "Please export cookies.txt via a browser plugin and select 'Local Cookie File'."
+            t = self.get_current_trans()
+            msg = t.get(
+                "log_win_browser_cookie_unsupported",
+                "Browser cookies are not supported on Windows. Please use Local Cookie File."
             )
-            msg_zh = (
-                "Windows 平台不支持直接使用浏览器 Cookie。\n"
-                "请通过浏览器插件导出 cookies.txt，并选择『本地 Cookie 文件』模式。"
-            )
-            # Show hint once per state change
-            if getattr(self, "_win_cookie_warned", False) is False:
+            if not getattr(self, "_win_cookie_warned", False):
                 self._win_cookie_warned = True
-                try:
-                    QMessageBox.information(self, "Hint", msg_en + "\n\n" + msg_zh)
-                except Exception:
-                    pass
-                self.log_thread_safe(msg_en + "\n" + msg_zh + "\n", "warning")
-        else:
-            # Re-enable download
-            self.download_btn.setEnabled(True)
-            self._win_cookie_warned = False
+                self.log_thread_safe(msg + "\n", "warning")
+            return
+
+        # Case 2: Local cookie file selected but no file chosen
+        if local_file_missing:
+            self.download_btn.setEnabled(False)
+            t = self.get_current_trans()
+            msg = t.get(
+                "log_local_cookie_missing",
+                "Local cookie file selected but no file chosen."
+            )
+            if not getattr(self, "_local_cookie_warned", False):
+                self._local_cookie_warned = True
+                self.log_thread_safe(msg + "\n", "warning")
+            return
+
+        # Otherwise: enable download
+        self.download_btn.setEnabled(True)
+        self._win_cookie_warned = False
+        self._local_cookie_warned = False
 
     def log_thread_safe(self, text, tag=None):
         self.log_signal.emit(text, tag or "info")
@@ -414,9 +423,10 @@ class MainWindow(QWidget):
 
         url = self.url_entry.text().strip()
         if not url:
-            QMessageBox.warning(self, "Tip", t.get("msg_input_url", "Please enter a URL"))
+            # Log-only hint (no modal dialog)
+            msg = t.get("msg_input_url", "Please enter a URL")
+            self.log_thread_safe(msg + "\n", "warning")
             return
-
 
         self.log_text.clear()
         self.download_btn.setText(t["btn_stop"])
@@ -504,16 +514,19 @@ class MainWindow(QWidget):
                 # macOS: aria2 is optional; hide engine if unavailable
                 if IS_MAC and not status.get("aria2"):
                     self._aria2_available = False
+
                     def hide_aria2():
                         # aria2 is at index 1: [native, aria2, re]
                         if self.engine_combo.count() >= 3:
                             self.engine_combo.removeItem(1)
+
                     QTimer.singleShot(0, hide_aria2)
                 else:
                     self._aria2_available = True
 
             except Exception:
                 pass
+
         self.threadpool.start(task)
 
     def change_language(self):
@@ -578,12 +591,24 @@ class MainWindow(QWidget):
 
         self.engine_combo.blockSignals(True)
         current_index = self.engine_combo.currentIndex()
+        # Re-check aria2 availability to avoid stale UI state
+
+        aria2_available = True
+        try:
+            status = self.installer.check_status()
+            aria2_available = bool(status.get("aria2"))
+        except Exception:
+            aria2_available = getattr(self, "_aria2_available", True)
+
+        self._aria2_available = aria2_available
+
         self.engine_combo.clear()
         engines = [t["engine_native"]]
-        if not IS_MAC or getattr(self, "_aria2_available", True):
+        if aria2_available:
             engines.append(t["engine_aria2"])
         engines.append(t["engine_re"])
         self.engine_combo.addItems(engines)
+
         self.engine_combo.setCurrentIndex(current_index)
         self.engine_combo.blockSignals(False)
 
@@ -628,6 +653,7 @@ class MainWindow(QWidget):
             self.cookie_file_path = f
             self.file_label.setText(os.path.basename(f))
             self.update_config("cookie_path", f)
+        self._update_download_enabled()
 
     def change_download_path(self):
         d = QFileDialog.getExistingDirectory(self, "Select download folder", self.download_dir)

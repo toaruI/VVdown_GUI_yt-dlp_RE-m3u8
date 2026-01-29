@@ -3,9 +3,9 @@
 Small PySide6 helper utilities to replace the original Tk widgets helpers.
 Provides a minimal setup_styles and a PasteFix helper used by the rewritten UI.
 """
+from PySide6.QtCore import QObject
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLineEdit
-from PySide6.QtCore import QObject, Qt
 
 
 def setup_styles(system_name):
@@ -25,6 +25,7 @@ class PasteFix(QObject):
     """Small helper to normalize paste behavior on QLineEdit.
     Usage: PasteFix(line_edit, cmd_key)
     """
+
     def __init__(self, line_edit: QLineEdit, cmd_key="Control"):
         super().__init__(line_edit)
         self._le = line_edit

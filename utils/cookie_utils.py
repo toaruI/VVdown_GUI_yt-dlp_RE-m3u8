@@ -1,15 +1,15 @@
 # core/cookie_utils.py
+import json
 import os
-from urllib.parse import urlparse
+import threading
 from functools import lru_cache
+from pathlib import Path
+from urllib.parse import urlparse
+
 from config.config import (
-    SYSTEM, IS_MAC, IS_WIN, IS_LINUX,
-    COOKIE_CACHE_ENABLED, COOKIE_CACHE_MAX_ENTRIES,
+    SYSTEM, COOKIE_CACHE_ENABLED, COOKIE_CACHE_MAX_ENTRIES,
     COOKIE_PERSISTENT_CACHE_ENABLED, COOKIE_PERSISTENT_CACHE_FILE,
 )
-import json
-import threading
-from pathlib import Path
 
 # ------------------------------
 # Persistent cookie match cache
@@ -170,6 +170,7 @@ def parse_cookie_file(filepath: str, target_url: str, max_len: int = 6000):
     except Exception:
         # 读取或解析出错，返回空字符串以便调用方选择降级行为
         return ""
+
 
 # ==============================
 # Browser cookie / capture plugins (v6multi helpers)

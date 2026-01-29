@@ -7,26 +7,30 @@ from PySide6.QtWidgets import QApplication
 from ui.app_window import MainWindow
 
 
-def main():
-    # 1. 针对 Windows 的高分屏(DPI) 适配
-    # 如果不加这段，Windows 上界面可能会模糊
-    if platform.system() == "Windows":
+def _enable_windows_dpi_awareness():
+    """Enable high-DPI awareness on Windows to avoid blurry UI."""
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
-            try:
-                ctypes.windll.user32.SetProcessDPIAware()
-            except Exception:
-                pass
+            pass
 
-    # 2. 创建 Qt 应用（⚠️ 不再使用 tkinter）
+
+def main():
+    # Enable high-DPI support on Windows
+    if platform.system() == "Windows":
+        _enable_windows_dpi_awareness()
+
+    # Create Qt application
     app = QApplication(sys.argv)
 
-    # 3. 创建主窗口（Qt Widget，不要传 Tk root）
-    win = MainWindow()
-    win.show()
+    # Create and show main window (Qt Widgets only)
+    window = MainWindow()
+    window.show()
 
-    # 4. 进入 Qt 事件循环
+    # Enter Qt event loop
     sys.exit(app.exec())
 
 

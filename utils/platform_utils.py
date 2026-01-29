@@ -3,7 +3,8 @@
 import os
 import subprocess
 import sys
-from config.config import SYSTEM, IS_MAC, IS_WIN, IS_LINUX
+
+from config.config import IS_MAC, IS_WIN
 
 
 def get_base_path():

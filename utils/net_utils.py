@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import json
 import socket
-import sys
 import urllib.request
 from dataclasses import dataclass
 from typing import Dict, Optional
 
 from config.config import IS_WIN, IS_MAC, IS_LINUX, IS_ARM
+
 
 # ------------------------------
 # Region detection
@@ -59,10 +59,10 @@ def _github_api_get(url: str, timeout: float = 10.0) -> dict:
 
 
 def _pick_asset(
-    assets: list[dict],
-    *,
-    keywords: list[str],
-    any_of: list[str] | None = None
+        assets: list[dict],
+        *,
+        keywords: list[str],
+        any_of: list[str] | None = None
 ) -> Optional[str]:
     # strict match: all keywords present
     for a in assets:
@@ -169,21 +169,21 @@ class ResourceProvider:
             for a in assets:
                 n = name(a)
                 if (
-                    n.startswith("ffmpeg-")
-                    and "win64" in n
-                    and "gpl" in n
-                    and "shared" not in n
-                    and n.endswith(".zip")
+                        n.startswith("ffmpeg-")
+                        and "win64" in n
+                        and "gpl" in n
+                        and "shared" not in n
+                        and n.endswith(".zip")
                 ):
                     return self._mirror(a.get("browser_download_url"))
             for a in assets:
                 n = name(a)
                 if (
-                    n.startswith("ffmpeg-")
-                    and "win64" in n
-                    and "gpl" in n
-                    and "static" in n
-                    and n.endswith(".zip")
+                        n.startswith("ffmpeg-")
+                        and "win64" in n
+                        and "gpl" in n
+                        and "static" in n
+                        and n.endswith(".zip")
                 ):
                     return self._mirror(a.get("browser_download_url"))
 
@@ -252,9 +252,9 @@ class ResourceProvider:
                 for a in assets:
                     n = _name(a)
                     if (
-                        ("darwin" in n or "mac" in n or "osx" in n)
-                        and ("arm64" in n or "aarch64" in n)
-                        and "linux" not in n
+                            ("darwin" in n or "mac" in n or "osx" in n)
+                            and ("arm64" in n or "aarch64" in n)
+                            and "linux" not in n
                     ):
                         return self._mirror(a.get('browser_download_url'))
 
@@ -262,9 +262,9 @@ class ResourceProvider:
             for a in assets:
                 n = _name(a)
                 if (
-                    ("darwin" in n or "mac" in n or "osx" in n)
-                    and ("x86_64" in n or "amd64" in n or "intel" in n or not is_arm)
-                    and "linux" not in n
+                        ("darwin" in n or "mac" in n or "osx" in n)
+                        and ("x86_64" in n or "amd64" in n or "intel" in n or not is_arm)
+                        and "linux" not in n
                 ):
                     return self._mirror(a.get('browser_download_url'))
 
@@ -302,9 +302,9 @@ class ResourceProvider:
             for a in assets:
                 n = _name(a)
                 if (
-                    ('mac' in n or 'darwin' in n or 'osx' in n)
-                    and 'linux' not in n
-                    and not n.endswith('.exe')
+                        ('mac' in n or 'darwin' in n or 'osx' in n)
+                        and 'linux' not in n
+                        and not n.endswith('.exe')
                 ):
                     return self._mirror(a.get('browser_download_url'))
 

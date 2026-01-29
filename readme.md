@@ -1,7 +1,8 @@
 # VVDown
 
 VVDown is a cross-platform video downloader focused on stability, maintainability, and modern download engine support.
-It provides a GUI-based workflow and manages all required dependencies locally without relying on system-level package managers.
+It provides a GUI-based workflow and manages all required dependencies locally without relying on system-level package
+managers.
 
 VVDown 是一个跨平台的视频下载工具，注重稳定性、可维护性以及现代下载引擎的支持。
 项目提供图形界面，并通过本地 bin 目录管理所有依赖，不依赖系统级包管理器。
@@ -14,34 +15,34 @@ VVDown 是一个跨平台的视频下载工具，注重稳定性、可维护性�
 
 - Multiple download engines  
   支持多个下载引擎：
-  - yt-dlp（通用下载引擎）
-  - aria2（多连接高速下载引擎）
-  - N_m3u8DL-RE（M3U8 / 流媒体下载引擎）
+    - yt-dlp（通用下载引擎）
+    - aria2（多连接高速下载引擎）
+    - N_m3u8DL-RE（M3U8 / 流媒体下载引擎）
 
 - Local bin-based dependency management  
   本地 bin 目录依赖管理：
-  - No mandatory Homebrew / apt / yum dependency  
-    不强制依赖 Homebrew、apt 或 yum
-  - No modification to system PATH  
-    不修改系统环境变量
-  - Same behavior for source and packaged builds  
-    源码运行与打包运行行为一致
+    - No mandatory Homebrew / apt / yum dependency  
+      不强制依赖 Homebrew、apt 或 yum
+    - No modification to system PATH  
+      不修改系统环境变量
+    - Same behavior for source and packaged builds  
+      源码运行与打包运行行为一致
 
 - Threaded downloading  
   多线程下载支持：
-  - RE engine supports `--thread-count`  
-    RE 引擎支持 `--thread-count` 参数
-  - Default behavior follows engine defaults (CPU core count)  
-    默认行为遵循引擎自身的 CPU 核心数设置
+    - RE engine supports `--thread-count`  
+      RE 引擎支持 `--thread-count` 参数
+    - Default behavior follows engine defaults (CPU core count)  
+      默认行为遵循引擎自身的 CPU 核心数设置
 
 - Cookie handling with extractor-aware strategy  
   基于 extractor 行为的 Cookie 处理策略：
-  - Browser cookies for sites such as Twitter / X  
-    对 Twitter / X 等站点自动使用浏览器 Cookie
-  - cookies.txt file support  
-    支持 cookies.txt 文件
-  - Avoids guest-mode failures  
-    避免游客模式导致的解析失败
+    - Browser cookies for sites such as Twitter / X  
+      对 Twitter / X 等站点自动使用浏览器 Cookie
+    - cookies.txt file support  
+      支持 cookies.txt 文件
+    - Avoids guest-mode failures  
+      避免游客模式导致的解析失败
 
 ---
 
@@ -119,25 +120,25 @@ VVDown 不会修改、分发或打包上述插件，其版权及许可证均归�
 
 - **Windows**  
   On Windows, an external `cookies.txt` file is required for authenticated downloads.  
-  Browser cookies cannot be accessed directly by external tools.  
-  
+  Browser cookies cannot be accessed directly by external tools.
+
   在 Windows 平台上，进行登录态下载时**必须提供外置的 `cookies.txt` 文件**，
   外部程序无法直接读取浏览器 Cookies。
 
 - **macOS / Linux**  
-  Browser cookies may be used directly for supported engines and extractors.  
-  
+  Browser cookies may be used directly for supported engines and extractors.
+
   在 macOS / Linux 平台上，部分引擎和 extractor 支持直接使用浏览器 Cookies。
 
 - **FFmpeg on macOS**  
-  On macOS, FFmpeg is provided via standalone builds from the `ffmpeg-static` project.  
-  
+  On macOS, FFmpeg is provided via standalone builds from the `ffmpeg-static` project.
+
   在 macOS 平台上，FFmpeg 使用 `ffmpeg-static` 项目提供的独立可执行文件。
 
 - **aria2 on macOS**  
   On macOS, aria2 is treated as an optional dependency. The GUI can detect an existing `aria2c` binary
-  (commonly installed via Homebrew), but will not automatically install aria2 on macOS.  
-  
+  (commonly installed via Homebrew), but will not automatically install aria2 on macOS.
+
   在 macOS 平台上，aria2 被视为可选依赖。GUI 可以识别系统中已有的 `aria2c`
   （例如通过 Homebrew 安装），但不会在 macOS 下自动安装 aria2。
 
@@ -151,7 +152,8 @@ VVDown 不会修改、分发或打包上述插件，其版权及许可证均归�
 - This GUI currently uses the default configuration of yt-dlp, FFmpeg, and N_m3u8DL-RE.  
   当前 GUI 使用 yt-dlp、FFmpeg 以及 N_m3u8DL-RE 的默认配置。
 
-- Advanced features (fine-grained engine options, extended post-processing, and advanced workflow customization) are still under active development.  
+- Advanced features (fine-grained engine options, extended post-processing, and advanced workflow customization) are
+  still under active development.  
   高级功能（如更细粒度的引擎参数配置、扩展后处理流程以及复杂下载工作流）仍在持续开发中。
 
 - The current focus is correctness, stability, and a clean architecture.  
@@ -198,10 +200,10 @@ On first launch, click **Fix Dependencies**.
 
 - Includes:  
   包含以下组件：
-  - yt-dlp
-  - ffmpeg
-  - aria2
-  - N_m3u8DL-RE
+    - yt-dlp
+    - ffmpeg
+    - aria2
+    - N_m3u8DL-RE
 
 No mandatory system-level installation is required.  
 在 macOS 平台上，不强制要求系统级安装。

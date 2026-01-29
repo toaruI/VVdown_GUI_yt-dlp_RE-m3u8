@@ -1,13 +1,12 @@
 # core/downloader.py
 import os
-from config.config import SYSTEM, IS_WIN, COOKIE_PERSISTENT_CACHE_ENABLED
 import subprocess
 import threading
-from typing import Callable, Optional, Tuple
-import tempfile
 from pathlib import Path
+from typing import Callable, Optional, Tuple
 
 from config import BIN_DIR
+from config.config import SYSTEM, IS_WIN, COOKIE_PERSISTENT_CACHE_ENABLED
 from utils import parse_cookie_file, is_cmd_available
 
 LogCb = Callable[[str, Optional[str]], None]
@@ -174,15 +173,19 @@ class DownloaderEngine:
         # 检查 yt-dlp
         if engine in ("native", "aria2"):
             if not is_cmd_available("yt-dlp"):
-                _safe_log(self.log, self._t('log_check_yt_fail', ">>> ❌ Env Check (System): yt-dlp not found. Click [Fix Dependencies].\n"), "warning")
+                _safe_log(self.log, self._t('log_check_yt_fail',
+                                            ">>> ❌ Env Check (System): yt-dlp not found. Click [Fix Dependencies].\n"),
+                          "warning")
         if engine == "re":
             re_exe = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
             re_path = os.path.join(BIN_DIR, re_exe)
             if not os.path.exists(re_path) and not is_cmd_available("N_m3u8DL-RE"):
-                _safe_log(self.log, self._t('log_re_not_found', "❌ Error: N_m3u8DL-RE not found in 'bin' folder!"), "error")
+                _safe_log(self.log, self._t('log_re_not_found', "❌ Error: N_m3u8DL-RE not found in 'bin' folder!"),
+                          "error")
         if engine == "aria2":
             if not is_cmd_available("aria2c"):
-                _safe_log(self.log, self._t('log_tip_install', "Tip: Please check if yt-dlp/ffmpeg is installed."), "warning")
+                _safe_log(self.log, self._t('log_tip_install', "Tip: Please check if yt-dlp/ffmpeg is installed."),
+                          "warning")
 
     def _build_command(self, url: str, engine: str, save_dir: str,
                        cookie_src: str, cookie_path: str, threads: int) -> Tuple[list, Optional[str]]:
@@ -240,19 +243,27 @@ class DownloaderEngine:
             else:
                 # Fallback to UI-selected cookie mode
                 if cookie_src == "file" and cookie_path:
-                    _safe_log(self.log, self._t('log_cookie_filter', ">>> Filtering cookies for target host: {host}...\n", host=""), "info")
+                    _safe_log(self.log,
+                              self._t('log_cookie_filter', ">>> Filtering cookies for target host: {host}...\n",
+                                      host=""), "info")
                     try:
                         cookie_str = parse_cookie_file(cookie_path, url)
                     except Exception as e:
-                        _safe_log(self.log, self._t('log_cookie_parse_error', ">>> ⚠️ Failed to parse cookie file: {e}\n", e=e), "warning")
+                        _safe_log(self.log,
+                                  self._t('log_cookie_parse_error', ">>> ⚠️ Failed to parse cookie file: {e}\n", e=e),
+                                  "warning")
                     if cookie_str:
                         cookie_header = f"Cookie: {cookie_str}"
                         cmd.extend(["--header", cookie_header])
                         _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Loaded cookies from file\n"), "success")
                     else:
-                        _safe_log(self.log, self._t('log_cookie_none', "⚠️ No cookies found for {host}. Falling back to direct download.", host=""), "warning")
+                        _safe_log(self.log, self._t('log_cookie_none',
+                                                    "⚠️ No cookies found for {host}. Falling back to direct download.",
+                                                    host=""), "warning")
                 elif cookie_src in ["chrome", "edge", "safari", "firefox"]:
-                    _safe_log(self.log, self._t('log_re_no_browser', "⚠️ RE engine does not support direct browser link."), "warning")
+                    _safe_log(self.log,
+                              self._t('log_re_no_browser', "⚠️ RE engine does not support direct browser link."),
+                              "warning")
 
         else:
             # yt-dlp 路径
@@ -276,16 +287,22 @@ class DownloaderEngine:
                     "--downloader", aria2_cmd,
                     "--downloader-args", f"{aria2_cmd}:-x {threads} -k 1M"
                 ])
-                _safe_log(self.log, self._t('log_aria2_enabled', ">>> Aria2 acceleration enabled (threads: {threads})\n", threads=threads), "info")
+                _safe_log(self.log,
+                          self._t('log_aria2_enabled', ">>> Aria2 acceleration enabled (threads: {threads})\n",
+                                  threads=threads), "info")
 
             # yt-dlp extractor-aware cookie strategy
             if _is_twitter_url(url):
                 # Twitter / X: always prefer browser cookies (officially supported)
                 if cookie_src in ["chrome", "edge", "firefox", "safari"]:
-                    _safe_log(self.log, self._t('log_cookie_from_browser', ">>> Using browser cookies for Twitter/X: {browser}\n", browser=cookie_src), "info")
+                    _safe_log(self.log,
+                              self._t('log_cookie_from_browser', ">>> Using browser cookies for Twitter/X: {browser}\n",
+                                      browser=cookie_src), "info")
                     cmd.extend(["--cookies-from-browser", cookie_src])
                 else:
-                    _safe_log(self.log, self._t('log_cookie_none', "⚠️ Twitter/X requires browser cookies for authenticated access."), "warning")
+                    _safe_log(self.log, self._t('log_cookie_none',
+                                                "⚠️ Twitter/X requires browser cookies for authenticated access."),
+                              "warning")
             else:
                 # Non-Twitter sites: prefer cookies.txt (fast path)
                 cookie_str = None
@@ -301,12 +318,15 @@ class DownloaderEngine:
                 else:
                     # Fallback to browser cookies
                     if cookie_src in ["chrome", "edge", "firefox", "safari"]:
-                        _safe_log(self.log, self._t('log_cookie_from_browser', ">>> Loading cookies from browser: {browser}\n", browser=cookie_src), "info")
+                        _safe_log(self.log,
+                                  self._t('log_cookie_from_browser', ">>> Loading cookies from browser: {browser}\n",
+                                          browser=cookie_src), "info")
                         cmd.extend(["--cookies-from-browser", cookie_src])
 
         return cmd, cookie_header
 
-    def run(self, url: str, options: dict, controller: Optional['DownloadController'] = None) -> Tuple[bool, Optional[int]]:
+    def run(self, url: str, options: dict, controller: Optional['DownloadController'] = None) -> Tuple[
+        bool, Optional[int]]:
         """
         同步运行下载（阻塞）。保持与旧版接口一致：返回 True/False。
         options: 包含 engine, threads, cookie_source, cookie_path, download_dir
