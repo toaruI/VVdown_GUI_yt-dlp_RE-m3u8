@@ -8,19 +8,184 @@ PySide6 MainWindow
 
 import os
 import threading
+import sys
 
+# Add QMenu to QtWidgets imports
 from PySide6.QtCore import Qt, Signal, Slot, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QGroupBox, QRadioButton, QFileDialog, QPlainTextEdit,
-    QSpinBox
+    QSpinBox, QApplication, QMainWindow, QPushButton, QMenu,
+    QSizePolicy,
 )
+# --- Custom title bar support ---
+from PySide6.QtGui import QMouseEvent, QPalette, QPainterPath, QRegion
+# ---- qdarktheme for modern dark/light mode ----
+import qdarktheme
 
 from config.config import TRANSLATIONS, SYSTEM, load_user_config, save_user_config, IS_MAC
 from core.downloader import DownloaderEngine
 from core.installer import DependencyInstaller
 from utils import setup_env_path, open_download_folder, resolve_cookie_plugin_url
 from .widgets import setup_styles, PasteFix
+
+
+# --- Custom Frameless Title Bar (platform-aware) ---
+class TitleBar(QWidget):
+    """
+    Lightweight, platform-aware title bar.
+    Responsibilities:
+    - Layout (traffic lights / title)
+    - Visual style (hover, spacing)
+    - Window drag forwarding
+    """
+
+    HEIGHT = 36
+    BTN_SIZE = 12
+    RADIUS = 6
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._parent = parent
+        self._drag_pos = None
+        self.is_mac = IS_MAC
+
+        self.setFixedHeight(self.HEIGHT)
+        self.setObjectName("TitleBar")
+        self.setMouseTracking(True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(8)
+
+        # -------- macOS traffic lights (left) --------
+        if self.is_mac:
+            self._traffic = QWidget(self)
+            self._traffic.setObjectName("MacTraffic")
+            self._traffic.setFixedHeight(self.HEIGHT)
+
+            traffic_layout = QHBoxLayout(self._traffic)
+            traffic_layout.setContentsMargins(4, 0, 4, 0)
+            traffic_layout.setSpacing(6)
+
+            self.btn_close = self._make_mac_btn("#ff5f57")
+            self.btn_min = self._make_mac_btn("#ffbd2e")
+            self.btn_max = self._make_mac_btn("#28c840")
+
+            # Delegate behavior to MainWindow (single source of truth)
+            self.btn_close.clicked.connect(self._parent.close)
+            self.btn_min.clicked.connect(self._parent.showMinimized)
+            self.btn_max.clicked.connect(self._parent.showFullScreen)
+
+            traffic_layout.addWidget(self.btn_close)
+            traffic_layout.addWidget(self.btn_min)
+            traffic_layout.addWidget(self.btn_max)
+            layout.addWidget(self._traffic)
+
+        # -------- title --------
+        self.title_label = QLabel(parent.windowTitle(), self)
+        self.title_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.title_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.title_label.setObjectName("TitleLabel")
+        layout.addWidget(self.title_label)
+        layout.addStretch(1)
+
+        # -------- Windows controls (right) --------
+        if not self.is_mac:
+            self.btn_min = QPushButton("–", self)
+            self.btn_max = QPushButton("▢", self)
+            self.btn_close = QPushButton("✕", self)
+
+            for b in (self.btn_min, self.btn_max, self.btn_close):
+                b.setFixedSize(32, 24)
+                b.setFocusPolicy(Qt.NoFocus)
+
+            self.btn_min.clicked.connect(self._parent.showMinimized)
+            self.btn_max.clicked.connect(self._parent.toggle_maximize)
+            self.btn_close.clicked.connect(self._parent.close)
+
+            layout.addWidget(self.btn_min)
+            layout.addWidget(self.btn_max)
+            layout.addWidget(self.btn_close)
+
+        self._apply_style()
+        self.update_title_color()
+
+    # -------- helpers --------
+
+    def _make_mac_btn(self, color: str) -> QPushButton:
+        btn = QPushButton(self)
+        btn.setFixedSize(self.BTN_SIZE, self.BTN_SIZE)
+        btn.setFocusPolicy(Qt.NoFocus)
+        btn.setCursor(Qt.ArrowCursor)
+        btn.setObjectName("MacTrafficButton")
+        btn.setStyleSheet(
+            f"background:{color}; border-radius:{self.RADIUS}px;"
+        )
+        return btn
+
+    def _apply_style(self):
+        """
+        Purely visual. No behavior here.
+        """
+        self.setAutoFillBackground(True)
+        pal = self.palette()
+        pal.setColor(QPalette.Window, pal.color(QPalette.Window))
+        self.setPalette(pal)
+
+        self.setStyleSheet(
+            """
+            QWidget#TitleBar {
+                background-color: palette(window);
+            }
+
+            QLabel#TitleLabel {
+                font-weight: 600;
+                font-size: 13px;
+            }
+
+            QWidget#MacTraffic:hover {
+                background-color: palette(alternate-base);
+                border-radius: 8px;
+            }
+
+            QPushButton {
+                background: transparent;
+                color: palette(text);
+            }
+            """
+        )
+
+    # -------- public API --------
+
+    def update_title(self, text: str):
+        self.title_label.setText(text)
+
+    def update_title_color(self):
+        theme = getattr(self._parent, "theme", "dark")
+        if theme == "dark":
+            self.title_label.setStyleSheet(
+                "color: rgba(255,255,255,0.85);"
+            )
+        else:
+            self.title_label.setStyleSheet(
+                "color: rgba(0,0,0,0.75);"
+            )
+
+    # -------- window drag --------
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton and not self.childAt(event.pos()):
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self._drag_pos
+            self._parent.move(self._parent.pos() + delta)
+            self._drag_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        self._drag_pos = None
 
 
 class MainWindow(QWidget):
@@ -52,11 +217,21 @@ class MainWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # Use a consistent cross-platform Qt style
+        try:
+            from PySide6.QtWidgets import QApplication
+            QApplication.setStyle("Fusion")
+        except Exception:
+            pass
         self.system = SYSTEM
 
         # ---- config ----
         self.config_data = load_user_config()
         self.lang = self.config_data.get("lang", "en")
+        self.theme = self.config_data.get("theme", "dark")
+
         self.download_dir = self.config_data.get("download_dir", os.path.expanduser("~/Downloads"))
         self.cookie_file_path = self.config_data.get("cookie_path", "")
 
@@ -100,6 +275,21 @@ class MainWindow(QWidget):
 
         # ---- ui ----
         self._build_ui()
+
+        # ---- theme ----
+        self.theme = self.config_data.get("theme", "dark")
+        qdarktheme.setup_theme(self.theme)
+        for w in (self, self._content, self.title_bar):
+            w.style().unpolish(w)
+            w.style().polish(w)
+            w.update()
+        self.update_config("theme", self.theme)
+        # Ensure dark theme propagates to all widgets
+        try:
+            QApplication.setAttribute(Qt.AA_UseStyleSheetPropagationInWidgetStyles, True)
+        except Exception:
+            pass
+
         self.restore_config_state()
         self.check_deps_on_start()
         self.log_signal.connect(self._append_log)
@@ -208,11 +398,38 @@ class MainWindow(QWidget):
         self.resize(740, 820 if self.system == "Darwin" else 780)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        # real content container for translucent window
+        self._content = QWidget(self)
+        self._content.setObjectName("MainWindowRoot")
+        self._content.setAutoFillBackground(True)
+        pal = self._content.palette()
+        pal.setColor(self._content.backgroundRole(), pal.color(QPalette.Base))
+        self._content.setPalette(pal)
+        # --- macOS/Qt native rounded corners: only style content, not window ---
+        self._content.setAttribute(Qt.WA_StyledBackground, True)
+        self._content.setStyleSheet("""
+QWidget#MainWindowRoot {
+    border-radius: 12px;
+}
+""")
+
+        content_layout = QVBoxLayout(self._content)
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(8)
+
+        root.addWidget(self._content)
+        # Custom title bar
+        self.title_bar = TitleBar(self)
+        content_layout.addWidget(self.title_bar)
+        # Remove default margins to avoid white bands in dark mode
+        # (already set above)
 
         # top bar
         top = QHBoxLayout()
         self.btn_open = QPushButton(t["btn_open_dir"])
-        self.btn_open.setFixedWidth(110)
+        self.btn_open.setFixedWidth(120)
         self.btn_open.clicked.connect(lambda: open_download_folder(self.download_dir))
         top.addWidget(self.btn_open)
 
@@ -223,19 +440,39 @@ class MainWindow(QWidget):
 
         top.addStretch()
 
-        self.lang_combo = QComboBox()
+        # language selector
+        self.lang_combo = ThemedComboBox()
+        self.lang_combo.setFont(self.font_ui)
         self.lang_combo.addItems(["English", "中文"])
         self.lang_combo.setCurrentIndex(0 if self.lang == "en" else 1)
         self.lang_combo.currentIndexChanged.connect(self.change_language)
         top.addWidget(QLabel("🌐"))
         top.addWidget(self.lang_combo)
 
+        # theme selector (dark / light)
+        self.theme_combo = ThemedComboBox()
+        self.lang_combo.setFont(self.font_ui)
+        self.theme_combo.addItems(["Dark", "Light"])
+        self.theme_combo.setCurrentIndex(0 if self.theme == "dark" else 1)
+        self.theme_combo.currentIndexChanged.connect(self.change_theme)
+        top.addWidget(QLabel("🎨"))
+        top.addWidget(self.theme_combo)
+
+        # --- ComboBox sizing (language & theme) ---
+        self.lang_combo.setFixedWidth(110)
+        self.theme_combo.setFixedWidth(100)
+        # Minimum height already set above
+
+        # Normalize ComboBox sizing policy (prevent upward popup)
+        self.lang_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+        self.theme_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+
         self.install_btn = QPushButton(t["btn_fix_dep"])
         self.install_btn.setFixedWidth(150)
         self.install_btn.clicked.connect(self.run_install)
         top.addWidget(self.install_btn)
 
-        root.addLayout(top)
+        content_layout.addLayout(top)
 
         # url
         self.url_group = QGroupBox(t["frame_url"])
@@ -243,7 +480,7 @@ class MainWindow(QWidget):
         self.url_entry = QLineEdit()
         PasteFix(self.url_entry, self.cmd_key)
         v.addWidget(self.url_entry)
-        root.addWidget(self.url_group)
+        content_layout.addWidget(self.url_group)
 
         # tools
         self.tools_group = QGroupBox(t["frame_tools"])
@@ -326,7 +563,7 @@ class MainWindow(QWidget):
         helper_layout.addStretch()
         tv.addLayout(helper_layout)
 
-        root.addWidget(self.tools_group)
+        content_layout.addWidget(self.tools_group)
 
         # Windows: slightly increase button font size for better readability
         if self.system == "Windows":
@@ -340,10 +577,16 @@ class MainWindow(QWidget):
         ev = QVBoxLayout()
         self.lbl_engine = QLabel(t["label_engine"])
         ev.addWidget(self.lbl_engine)
-        self.engine_combo = QComboBox()
+        self.engine_combo = ThemedComboBox()
+        self.engine_combo.setFont(self.font_ui)
         self.engine_combo.addItems([t["engine_native"], t["engine_aria2"], t["engine_re"]])
         self.engine_combo.currentIndexChanged.connect(self.toggle_engine_ui)
+        self.engine_combo.setFont(self.font_ui)
+        self.engine_combo.setMinimumHeight(28)
         ev.addWidget(self.engine_combo)
+
+        # Normalize ComboBox sizing policy (prevent upward popup)
+        self.engine_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
 
         th = QHBoxLayout()
         self.lbl_threads = QLabel(t.get("label_threads", "Threads:"))
@@ -370,20 +613,20 @@ class MainWindow(QWidget):
         self.btn_path.clicked.connect(self.change_download_path)
         pv.addWidget(self.btn_path, alignment=Qt.AlignRight)
         ctrl.addLayout(pv)
-        root.addLayout(ctrl)
+        content_layout.addLayout(ctrl)
 
         # start
         self.download_btn = QPushButton(t["btn_start"])
         self.download_btn.setFixedWidth(280)
         self.download_btn.clicked.connect(self.toggle_download)
-        root.addWidget(self.download_btn, alignment=Qt.AlignHCenter)
+        content_layout.addWidget(self.download_btn, alignment=Qt.AlignHCenter)
 
         # log
         self.lbl_log = QLabel(t["label_log"])
-        root.addWidget(self.lbl_log)
+        content_layout.addWidget(self.lbl_log)
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
-        root.addWidget(self.log_text)
+        content_layout.addWidget(self.log_text)
 
         for src, rb in {
             "none": self.rb_guest,
@@ -603,6 +846,8 @@ class MainWindow(QWidget):
 
         # window title
         self.setWindowTitle(f"{t['title']} ({display_name})")
+        if hasattr(self, 'title_bar'):
+            self.title_bar.update_title(self.windowTitle())
 
         # top bar
         self.btn_open.setText(t["btn_open_dir"])
@@ -762,3 +1007,122 @@ class MainWindow(QWidget):
             return
 
         webbrowser.open(url)
+
+    def change_theme(self):
+        new_theme = "dark" if self.theme_combo.currentText() == "Dark" else "light"
+        if new_theme == self.theme:
+            return
+
+        self.theme = new_theme
+        qdarktheme.setup_theme(self.theme)
+        pal = self._content.palette()
+        pal.setColor(self._content.backgroundRole(), pal.color(QPalette.Base))
+        if hasattr(self, "title_bar"):
+            self.title_bar.update_title_color()
+        self._content.setPalette(pal)
+        self._content.update()
+        widgets_to_refresh = [self, self._content, self.lang_combo, self.theme_combo, self.engine_combo]
+        for w in widgets_to_refresh:
+            w.style().unpolish(w)
+            w.style().polish(w)
+            w.update()
+        self.update_config("theme", self.theme)
+        self._refresh_text()
+
+        # optional log
+        t = self.get_current_trans()
+        msg = t.get("log_theme_switched", "Theme switched to {}.")
+        self.log_thread_safe(msg.format(self.theme), "info")
+
+
+class ThemedComboBox(QComboBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 设置光标为手型，增加交互感
+        self.setCursor(Qt.PointingHandCursor)
+        # 允许调整大小以适应内容，但保持最小高度
+        self.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.setMinimumHeight(30)  # 稍微增高一点，更现代
+
+        # 设置视图（下拉列表）的样式代理，使其支持圆角
+        view = self.view()
+        view.window().setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        view.setAttribute(Qt.WA_TranslucentBackground)
+
+        # 应用样式
+        self._apply_styles()
+
+    def _apply_styles(self):
+        """
+        使用 palette() 引用全局配色，这样 qdarktheme 切换时会自动生效。
+        """
+        self.setStyleSheet("""
+        /* 主体样式 */
+        QComboBox {
+            background-color: palette(base);
+            color: palette(text);
+            border: 1px solid palette(mid);
+            border-radius: 6px;
+            padding: 4px 10px;
+            /* 字体大小继承自父级，也可以在这里微调，例如 font-size: 13px; */
+        }
+
+        /* 鼠标悬停 */
+        QComboBox:hover {
+            border: 1px solid palette(highlight);
+            background-color: palette(alternate-base);
+        }
+
+        /* 获得焦点（按下） */
+        QComboBox:on { 
+            border: 1px solid palette(highlight);
+        }
+
+        /* 下拉箭头区域 */
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 20px;
+            border-top-right-radius: 6px;
+            border-bottom-right-radius: 6px;
+            border-left-width: 0px;
+        }
+
+        /* 下拉箭头图标 (使用透明边框绘制简单的箭头，或者依赖默认) */
+        QComboBox::down-arrow {
+            width: 0; 
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid palette(text); /* 箭头颜色跟随文字 */
+            margin-right: 6px;
+        }
+
+        /* 下拉列表 (Popup) 样式 */
+        QComboBox QAbstractItemView {
+            background-color: palette(base);
+            color: palette(text);
+            border: 1px solid palette(mid);
+            border-radius: 6px;
+            outline: none; /* 去掉选中时的虚线框 */
+            padding: 4px;
+            selection-background-color: palette(highlight);
+            selection-color: palette(highlighted-text);
+        }
+
+        /* 下拉列表项 */
+        QComboBox QAbstractItemView::item {
+            min-height: 24px;
+            border-radius: 4px; /* 列表项也搞圆角 */
+            padding-left: 5px;
+        }
+
+        QComboBox QAbstractItemView::item:hover {
+            background-color: palette(midlight);
+        }
+
+        QComboBox QAbstractItemView::item:selected {
+            background-color: palette(highlight);
+            color: palette(highlighted-text);
+        }
+        """)
