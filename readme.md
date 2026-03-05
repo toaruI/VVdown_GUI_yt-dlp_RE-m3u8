@@ -279,6 +279,9 @@ This project is built on top of the following open-source projects:
   https://www.qt.io  
   https://wiki.qt.io/Qt_for_Python
 
+- PyQtDarkTheme  
+  https://github.com/5yutan5/PyQtDarkTheme
+
 Special thanks to all contributors of these projects.  
 感谢以上项目的所有贡献者。
 
