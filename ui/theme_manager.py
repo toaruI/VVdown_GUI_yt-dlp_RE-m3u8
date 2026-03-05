@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtGui import QPalette
+from PySide6.QtCore import Qt
 import qdarktheme
 from .widgets import apply_global_style
 
@@ -10,20 +11,20 @@ class ThemeManager:
 
     def apply_full_theme(self, first_time=False):
         app = QApplication.instance()
-        
+
         qdarktheme.setup_theme(self.mw.theme)
-        
+
         if first_time:
             apply_global_style(app)
-        
+
         pal = QApplication.palette()
         bg = pal.color(QPalette.Window).name()
-        
+
         if self.mw.theme == "dark":
             border_color = "rgba(255, 255, 255, 0.08)"
         else:
             border_color = "rgba(0, 0, 0, 0.12)"
-            
+
         self.mw._content.setStyleSheet(f"""
             QWidget#MainWindowRoot {{
                 background-color: {bg};
@@ -31,6 +32,41 @@ class ThemeManager:
                 border-radius: 14px;
             }}
         """)
+
+        # Ensure the main window and central widget use the current palette Window color
+        try:
+            # make the main window fillable by styles (important on some platforms/compositors)
+            self.mw.setAttribute(Qt.WA_StyledBackground, True)
+            self.mw.setAutoFillBackground(True)
+
+            # sync the main window palette Window color with application palette
+            mw_pal = self.mw.palette()
+            mw_pal.setColor(QPalette.Window, pal.color(QPalette.Window))
+            self.mw.setPalette(mw_pal)
+
+            # also ensure central widget (if any) follows the palette and is styled
+            cw = None
+            try:
+                cw = self.mw.centralWidget()
+            except Exception:
+                cw = None
+
+            if cw is None:
+                # If central widget is missing, ensure _content is used as central container
+                cw = getattr(self.mw, "_content", None)
+
+            if cw is not None:
+                cw.setAttribute(Qt.WA_StyledBackground, True)
+                cw.setAutoFillBackground(True)
+                cw_pal = cw.palette()
+                cw_pal.setColor(QPalette.Window, pal.color(QPalette.Window))
+                cw.setPalette(cw_pal)
+
+            # As a final guard, set a top-level stylesheet only for QMainWindow to avoid overriding child widgets
+            self.mw.setStyleSheet(f"QMainWindow {{ background-color: {bg}; }}")
+        except Exception:
+            # keep theme application resilient; avoid raising here
+            pass
         
         if hasattr(self.mw, "title_bar"):
             self.mw.title_bar.update_title_color()

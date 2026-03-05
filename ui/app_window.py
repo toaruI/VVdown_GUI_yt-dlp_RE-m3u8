@@ -65,6 +65,10 @@ class MainWindow(QWidget):
 
         # ---- Handlers Initialization (early so ui setup can access them if needed) ----
         self.theme_manager = ThemeManager(self)
+        try:
+            self.theme_manager.apply_full_theme(first_time=True)
+        except Exception:
+            pass
         self.cookie_manager = CookieManager(self)
         self.ui_state_manager = UIStateManager(self)
         self.dependency_handler = DependencyHandler(self)
@@ -100,7 +104,7 @@ class MainWindow(QWidget):
         self._content.setGraphicsEffect(self.shadow)
 
         # ---- theme ----
-        self.theme_manager.apply_full_theme(first_time=True)
+        self.theme_manager.apply_full_theme(first_time=False)
         self.update_config("theme", self.theme)
 
         self.ui_state_manager.restore_config_state()
