@@ -80,7 +80,14 @@ class ThemeManager:
         widget.update()
 
     def change_theme(self):
-        new_theme = "dark" if self.mw.theme_combo.currentText() == "Dark" else "light"
+        current_text = self.mw.theme_combo.currentText()
+        if current_text == "Auto":
+            new_theme = "auto"
+        elif current_text == "Dark":
+            new_theme = "dark"
+        else:
+            new_theme = "light"
+
         if new_theme == self.mw.theme:
             return
 

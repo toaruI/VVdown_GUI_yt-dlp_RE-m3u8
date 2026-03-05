@@ -42,71 +42,18 @@ class ThemedComboBox(QComboBox):
         # Force QListView to bypass macOS native popup menu overlapping behavior
         self.setView(QListView())
         # Do NOT touch self.view().window() flags — it breaks popup positioning.
-        self._apply_styles()
 
-    def _apply_styles(self):
-        self.setStyleSheet("""
-        QComboBox {
-            combobox-popup: 0;
-            background-color: palette(button);
-            color: palette(button-text);
-            border: 1px solid palette(mid);
-            border-radius: 8px;
-            padding: 5px 28px 5px 12px;
-            min-height: 22px;
-        }
+    def showPopup(self):
+        super().showPopup()
+        popup = self.view().window()
 
-        QComboBox:hover {
-            border: 1px solid palette(highlight);
-            background-color: palette(light);
-        }
+        if popup:
+            pos = self.mapToGlobal(self.rect().bottomLeft())
+            pos.setY(pos.y() + 2)
+            popup.move(pos)
+            popup.setFixedWidth(self.width())
 
-        QComboBox:on {
-            border: 1px solid palette(highlight);
-            background-color: palette(midlight);
-        }
 
-        /* Arrow area */
-        QComboBox::drop-down {
-            subcontrol-origin: padding;
-            subcontrol-position: center right;
-            width: 24px;
-            background: transparent;
-            border: none;
-        }
-
-        QComboBox::down-arrow {
-            width: 0;
-            height: 0;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 6px solid palette(text);
-            margin-right: 6px;
-        }
-
-        /* Popup list */
-        QComboBox QAbstractItemView {
-            background-color: palette(base);
-            color: palette(text);
-            outline: none;
-            selection-background-color: palette(highlight);
-            selection-color: palette(highlighted-text);
-        }
-
-        QComboBox QAbstractItemView::item {
-            min-height: 26px;
-            padding: 2px 8px;
-        }
-
-        QComboBox QAbstractItemView::item:hover {
-            background-color: palette(midlight);
-        }
-
-        QComboBox QAbstractItemView::item:selected {
-            background-color: palette(highlight);
-            color: palette(highlighted-text);
-        }
-        """)
 
 
 class PasteFix(QObject):

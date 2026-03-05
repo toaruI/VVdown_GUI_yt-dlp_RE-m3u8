@@ -65,8 +65,13 @@ class MainWindowUI:
         # theme selector (dark / light)
         main_window.theme_combo = ThemedComboBox()
         main_window.theme_combo.setFont(main_window.font_ui)
-        main_window.theme_combo.addItems(["Dark", "Light"])
-        main_window.theme_combo.setCurrentIndex(0 if main_window.theme == "dark" else 1)
+        main_window.theme_combo.addItems(["Auto", "Dark", "Light"])
+        if main_window.theme == "auto":
+            main_window.theme_combo.setCurrentIndex(0)
+        elif main_window.theme == "dark":
+            main_window.theme_combo.setCurrentIndex(1)
+        else:  # light
+            main_window.theme_combo.setCurrentIndex(2)
         main_window.theme_combo.currentIndexChanged.connect(main_window.change_theme)
         top.addWidget(QLabel("🎨"))
         top.addWidget(main_window.theme_combo)

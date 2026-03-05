@@ -441,6 +441,18 @@ class DependencyInstaller:
         # (EXTRACTION MOVED TO _extract_archive_to_bin)
 
     def _ensure_aria2(self, controller: Optional[InstallController] = None) -> bool:
+        if IS_MAC:
+            if shutil.which("aria2c"):
+                _log_raw(self.log, "aria2c found in system PATH.\n", "success")
+                return True
+            else:
+                msg = (
+                    "aria2 is missing! On macOS, manual installation is required.\n"
+                    "Please open Terminal and run: brew install aria2\n"
+                )
+                _log_raw(self.log, msg, "error")
+                return False
+
         name = "aria2c.exe" if IS_WIN else "aria2c"
         target = os.path.join(BIN_DIR, name)
 
