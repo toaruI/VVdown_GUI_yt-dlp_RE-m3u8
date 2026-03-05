@@ -31,8 +31,10 @@ class MainWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("MainWindow")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
 
         try:
             QApplication.setStyle("Fusion")

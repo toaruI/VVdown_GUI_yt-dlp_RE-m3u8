@@ -33,16 +33,22 @@ class ThemeManager:
             }}
         """)
 
-        # Ensure the main window and central widget use the current palette Window color
-        try:
-            # make the main window fillable by styles (important on some platforms/compositors)
-            self.mw.setAttribute(Qt.WA_StyledBackground, True)
-            self.mw.setAutoFillBackground(True)
+        self.mw._content.setStyleSheet(f"""
+            QWidget#MainWindowRoot {{
+                background-color: {bg};
+                border: 1px solid {border_color};
+                border-radius: 14px;
+            }}
+        """)
 
-            # sync the main window palette Window color with application palette
-            mw_pal = self.mw.palette()
-            mw_pal.setColor(QPalette.Window, pal.color(QPalette.Window))
-            self.mw.setPalette(mw_pal)
+        # FORCE transparency on the outer container.
+        # We REMOVE setAutoFillBackground and the solid QMainWindow stylesheet
+        # to allow WA_TranslucentBackground to work correctly.
+        try:
+            self.mw.setAttribute(Qt.WA_StyledBackground, True)
+
+            # Do NOT setAutoFillBackground(True) on the top-level window
+            self.mw.setAutoFillBackground(False)
 
             # also ensure central widget (if any) follows the palette and is styled
             cw = None
@@ -52,7 +58,6 @@ class ThemeManager:
                 cw = None
 
             if cw is None:
-                # If central widget is missing, ensure _content is used as central container
                 cw = getattr(self.mw, "_content", None)
 
             if cw is not None:
@@ -61,11 +66,11 @@ class ThemeManager:
                 cw_pal = cw.palette()
                 cw_pal.setColor(QPalette.Window, pal.color(QPalette.Window))
                 cw.setPalette(cw_pal)
-
-            # As a final guard, set a top-level stylesheet only for QMainWindow to avoid overriding child widgets
-            self.mw.setStyleSheet(f"QMainWindow {{ background-color: {bg}; }}")
+            
+            # Explicitly force the top-level container to be transparent via CSS
+            # Using QWidget#MainWindow targets our main window without affecting children.
+            self.mw.setStyleSheet("QWidget#MainWindow { background: transparent; border: none; }")
         except Exception:
-            # keep theme application resilient; avoid raising here
             pass
         
         if hasattr(self.mw, "title_bar"):

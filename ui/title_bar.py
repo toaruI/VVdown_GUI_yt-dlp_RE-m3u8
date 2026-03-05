@@ -122,7 +122,6 @@ class TitleBar(QWidget):
 
     def _apply_style(self):
         """Title bar background and label styling."""
-        self.setAutoFillBackground(True)
         self.setStyleSheet("""
             QWidget#TitleBar {
                 background-color: transparent;
