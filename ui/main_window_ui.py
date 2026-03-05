@@ -25,7 +25,7 @@ class MainWindowUI:
         # real content container for translucent window
         main_window._content = QWidget(main_window)
         main_window._content.setObjectName("MainWindowRoot")
-        main_window._content.setAutoFillBackground(True)
+        main_window._content.setAutoFillBackground(False)
         main_window._content.setAttribute(Qt.WA_StyledBackground, True)
 
         content_layout = QVBoxLayout(main_window._content)

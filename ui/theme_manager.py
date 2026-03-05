@@ -17,21 +17,13 @@ class ThemeManager:
         if first_time:
             apply_global_style(app)
 
-        pal = QApplication.palette()
+        pal = qdarktheme.load_palette(self.mw.theme)
         bg = pal.color(QPalette.Window).name()
 
         if self.mw.theme == "dark":
             border_color = "rgba(255, 255, 255, 0.08)"
         else:
             border_color = "rgba(0, 0, 0, 0.12)"
-
-        self.mw._content.setStyleSheet(f"""
-            QWidget#MainWindowRoot {{
-                background-color: {bg};
-                border: 1px solid {border_color};
-                border-radius: 14px;
-            }}
-        """)
 
         self.mw._content.setStyleSheet(f"""
             QWidget#MainWindowRoot {{
