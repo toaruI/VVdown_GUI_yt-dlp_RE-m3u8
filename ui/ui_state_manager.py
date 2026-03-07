@@ -88,15 +88,18 @@ class UIStateManager:
 
         self.mw.lbl_log.setText(t["label_log"])
 
-        if getattr(self.mw, "_last_lang_logged", None) != self.mw.lang:
-            self.mw._last_lang_logged = self.mw.lang
+        old_lang = getattr(self.mw, "_last_lang_logged", None)
+
+        if old_lang is not None and old_lang != self.mw.lang:
             try:
                 msg = t.get("log_language_switched")
                 if not msg:
-                    msg = ">>> Language switched to {}\\n"
+                    msg = ">>> Language switched to {}\n"
                 self.mw.log_thread_safe(msg.format(self.mw.lang), "info")
             except Exception:
                 pass
+
+        self.mw._last_lang_logged = self.mw.lang
 
         self.toggle_engine_ui()
 
@@ -129,3 +132,33 @@ class UIStateManager:
 
         if is_re and self.mw.cookie_source in {"chrome", "edge", "firefox", "safari"}:
             self.mw.rb_guest.setChecked(True)
+
+    def apply_mac_hover_fix(self):
+        self.mw.activateWindow()
+        self.mw.raise_()
+
+        def wake_up_hover():
+            current_size = self.mw.size()
+            self.mw.resize(current_size.width(), current_size.height() + 1)
+            QTimer.singleShot(50, lambda: self.mw.resize(current_size))
+
+        QTimer.singleShot(100, wake_up_hover)
+
+    def toggle_maximize(self):
+        normal_margins = (12, 8, 12, 24)
+
+        if self.mw.isMaximized() or self.mw.isFullScreen():
+            self.mw.showNormal()
+            self.mw.layout().setContentsMargins(*normal_margins)
+
+            if hasattr(self.mw, 'title_bar'):
+                self.mw.title_bar.update_maximize_icon(False)
+        else:
+            self.mw.layout().setContentsMargins(0, 0, 0, 0)
+            if getattr(self.mw, "system", "") == "Darwin":
+                self.mw.showFullScreen()
+            else:
+                self.mw.showMaximized()
+
+            if hasattr(self.mw, 'title_bar'):
+                self.mw.title_bar.update_maximize_icon(True)

@@ -46,7 +46,7 @@ class DownloadHandler:
     def toggle_download(self):
         t = self.mw.get_current_trans()
         if self.mw.download_controller and self.mw.download_controller._proc:
-            self.mw.log_thread_safe(t.get("log_download_stop", "\\n>>> Download Stopped.\\n"), "warning")
+            self.mw.log_thread_safe(t.get("log_download_stop", "\n>>> Download Stopped.\n"), "warning")
             controller = self.mw.download_controller
             self.reset_download_ui()
             try:
@@ -58,7 +58,7 @@ class DownloadHandler:
         url = self.mw.url_entry.text().strip()
         if not url:
             msg = t.get("msg_input_url", "Please enter a URL")
-            self.mw.log_thread_safe(msg + "\\n", "warning")
+            self.mw.log_thread_safe(msg + "\n", "warning")
             return
 
         engine_text = self.mw.engine_combo.currentText().lower()
@@ -70,7 +70,7 @@ class DownloadHandler:
                     "log_re_requires_m3u8",
                     "RE engine requires a direct m3u8/mpd URL. Please use yt-dlp for webpage URLs."
                 )
-                self.mw.log_thread_safe(msg + "\\n", "warning")
+                self.mw.log_thread_safe(msg + "", "warning")
                 return
 
         self.mw.log_text.clear()
@@ -94,7 +94,7 @@ class DownloadHandler:
             self.mw.download_controller = self.mw.downloader.run_threaded(url, opts)
         except Exception as e:
             msg = self.map_exception_to_user_message(e)
-            self.mw.log_thread_safe(msg + "\\n", "error")
+            self.mw.log_thread_safe(msg + "\n", "error")
             self.mw.download_btn.setText(t["btn_start"])
             self.mw.download_controller = None
             return

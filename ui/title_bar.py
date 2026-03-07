@@ -49,7 +49,7 @@ class TitleBar(QWidget):
 
             self.btn_close.clicked.connect(self._parent.close)
             self.btn_min.clicked.connect(self._parent.showMinimized)
-            self.btn_max.clicked.connect(self._parent.showFullScreen)
+            self.btn_max.clicked.connect(self._parent.ui_state_manager.toggle_maximize)
 
             traffic_layout.addWidget(self.btn_close)
             traffic_layout.addWidget(self.btn_min)
@@ -77,7 +77,7 @@ class TitleBar(QWidget):
                 b.setObjectName("WinControlButton")
 
             self.btn_min.clicked.connect(self._parent.showMinimized)
-            self.btn_max.clicked.connect(self._parent.toggle_maximize)
+            self.btn_max.clicked.connect(self._parent.ui_state_manager.toggle_maximize)
             self.btn_close.clicked.connect(self._parent.close)
 
             layout.addWidget(self.btn_min)
@@ -163,6 +163,19 @@ class TitleBar(QWidget):
             self.title_label.setStyleSheet(
                 "QLabel#TitleLabel { color: rgba(0,0,0,0.75); font-weight: 600; font-size: 13px; background: transparent; border: none; }"
             )
+
+    def update_maximize_icon(self, is_maximized: bool):
+        if self.is_mac:
+            symbol = "↙" if is_maximized else "↗"
+            self.btn_max.setText(symbol)
+        else:
+            symbol = "🗗" if is_maximized else "▢"
+            self.btn_max.setText(symbol)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            if hasattr(self._parent, 'toggle_maximize'):
+                self._parent.ui_state_manager.toggle_maximize()
 
     # -------- window drag --------
 

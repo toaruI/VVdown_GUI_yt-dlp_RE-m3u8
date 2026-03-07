@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QGroupBox, QRadioButton, QPlainTextEdit,
-    QSpinBox, QButtonGroup
+    QSpinBox, QButtonGroup, QSizeGrip
 )
 from utils import open_download_folder
 from .widgets import PasteFix, ThemedComboBox
@@ -18,9 +18,11 @@ class MainWindowUI:
         main_window.setWindowTitle(f"{t['title']} ({display_name})")
         main_window.resize(740, 820 if main_window.system == "Darwin" else 780)
 
+        main_window.setMinimumSize(720, 600)
+
         root = QVBoxLayout(main_window)
         # Margin around content allows shadow to render
-        root.setContentsMargins(12, 8, 12, 12)
+        root.setContentsMargins(2, 2, 2, 2)
 
         # real content container for translucent window
         main_window._content = QWidget(main_window)

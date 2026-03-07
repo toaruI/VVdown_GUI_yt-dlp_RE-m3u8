@@ -34,6 +34,7 @@ class MainWindow(QWidget):
         self.setObjectName("MainWindow")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("QMainWindow#MainWindow { background-color: rgba(0, 0, 0, 1); }")
         self.setAttribute(Qt.WA_NoSystemBackground, True)
 
         try:
@@ -67,10 +68,6 @@ class MainWindow(QWidget):
 
         # ---- Handlers Initialization (early so ui setup can access them if needed) ----
         self.theme_manager = ThemeManager(self)
-        try:
-            self.theme_manager.apply_full_theme(first_time=True)
-        except Exception:
-            pass
         self.cookie_manager = CookieManager(self)
         self.ui_state_manager = UIStateManager(self)
         self.dependency_handler = DependencyHandler(self)
@@ -96,14 +93,6 @@ class MainWindow(QWidget):
 
         # ---- ui ----
         self._build_ui()
-
-        # ---- premium shadow (macOS/Windows) ----
-        self.shadow = QGraphicsDropShadowEffect(self)
-        self.shadow.setBlurRadius(24)
-        self.shadow.setXOffset(0)
-        self.shadow.setYOffset(6)
-        self.shadow.setColor(QColor(0, 0, 0, 80))
-        self._content.setGraphicsEffect(self.shadow)
 
         # ---- theme ----
         self.theme_manager.apply_full_theme(first_time=False)
@@ -189,3 +178,7 @@ class MainWindow(QWidget):
 
     def change_theme(self):
         self.theme_manager.change_theme()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.ui_state_manager.apply_mac_hover_fix()
