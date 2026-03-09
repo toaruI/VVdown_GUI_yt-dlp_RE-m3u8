@@ -205,6 +205,25 @@ def parse_cookie_file(filepath: str, target_url: str, max_len: int = 6000):
         # 读取或解析出错，返回空字符串以便调用方选择降级行为
         return ""
 
+def parse_cookie_file_all(filepath: str, max_len: int = 6000) -> str:
+    """read all cookies from a Netscape format cookie file, ignoring domain matching."""
+    if not os.path.exists(filepath):
+        return ""
+    cookies = {}
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                fields = line.split('\t')
+                if len(fields) >= 7:
+                    cookies[fields[5]] = fields[6]
+        result = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        return result[:max_len] if len(result) > max_len else result
+    except Exception:
+        return ""
+
 
 # ==============================
 # Browser cookie / capture plugins (v6multi helpers)

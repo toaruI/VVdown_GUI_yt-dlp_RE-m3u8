@@ -121,8 +121,8 @@ class DownloaderEngine:
             base.mkdir(parents=True, exist_ok=True)
             out_file = base / f"cookies_{browser}.txt"
 
-            print(f"[DEBUG bootstrap] out_file={out_file}")
-            print(f"[DEBUG bootstrap] exists={out_file.exists()}")
+            #print(f"[DEBUG bootstrap] out_file={out_file}")
+            #print(f"[DEBUG bootstrap] exists={out_file.exists()}")
 
             FRESH_SECONDS = 3600  # 约 60 分钟内的缓存都认为是新鲜的，避免频繁调用 yt-dlp 导出
             if out_file.exists() and (time.time() - out_file.stat().st_mtime) < FRESH_SECONDS:
@@ -201,7 +201,7 @@ class DownloaderEngine:
             except Exception:
                 pass
 
-    def _resolve_cookie(self, cookie_src: str, cookie_path: str, url: str):
+    def _resolve_cookie(self, cookie_src: str, cookie_path: str, url: str, engine="native"):
         """
         统一解析 Cookie，返回 (cookie_str, cookie_file_path, browser_fallback)
         - cookie_str: "k=v; k2=v2" 格式，用于 header 注入
@@ -213,56 +213,70 @@ class DownloaderEngine:
         if cookie_src == "none":
             return None, None, None
 
+        if not cookie_path:
+            if cookie_src == "file":
+                _safe_log(self.log,
+                          self._t('log_cookie_no_file',
+                                  'No cookie file selected.\n'),
+                          "warning")
+                return None, None, None
+            if cookie_src in ("chrome", "edge", "firefox", "safari"):
+                return None, None, cookie_src
+            return None, None, None
+
         #print(f"[DEBUG _resolve_cookie] cookie_src={cookie_src}, cookie_path={cookie_path}")
         #print(f"[DEBUG _resolve_cookie] COOKIE_PERSISTENT_CACHE_ENABLED={COOKIE_PERSISTENT_CACHE_ENABLED}")
 
         # try persistent cache first (only if cookie_path is provided.
         # otherwise skip to avoid unnecessary file access)
-        if COOKIE_PERSISTENT_CACHE_ENABLED and cookie_path:
-            try:
+
+        is_manual = (cookie_src == "file")
+
+        if is_manual:
+            _safe_log(self.log,
+                      self._t('log_cookie_filter',
+                              '>>> Filtering cookies for target host...\n'),
+                      "info")
+
+        try:
+            if engine == "re":
+                from utils import parse_cookie_file_all
+                cookie_str = parse_cookie_file_all(cookie_path)
+            else:
                 cookie_str = parse_cookie_file(cookie_path, url)
+        except Exception as e:
+            _safe_log(self.log,
+                      self._t('log_cookie_parse_error',
+                              '>>> ⚠️ Failed to parse cookie file: {e}\n', e=e),
+                      "warning")
+            cookie_str = None
 
-                print(
-                    f"[DEBUG _resolve_cookie] parse_cookie_file returned: len={len(cookie_str) if cookie_str else 'None'}")
-                print(f"[DEBUG _resolve_cookie] cookie_str preview: '{(cookie_str or '')[:100]}'")
+        if cookie_str:
+            if is_manual:
+                _safe_log(self.log,
+                        self._t('log_cookie_loaded_file',
+                                '>>> Loaded {count} cookies from file\n', count=len(cookie_str)),
+                        "success")
+            else:
+                _safe_log(self.log,
+                          self._t('log_cookie_match',
+                                  '>>> Loaded {count} cookies from cache\n',
+                                  count=len(cookie_str)),
+                          "success")
+                return cookie_str, cookie_path, None
 
-                if cookie_str:
-                    _safe_log(self.log,
-                              self._t('log_cookie_match',
-                                      '>>> Loaded {count} cookies from cache\n',
-                                      count=len(cookie_str)),
-                              "success")
-                    return cookie_str, cookie_path, None
-            except Exception as e:
-                print(f"[DEBUG _resolve_cookie] parse EXCEPTION: {e}")
-                _safe_log(self.log,
-                          self._t('log_cookie_parse_error',
-                                  '>>> Failed to parse cookie file: {e}\n', e=e),
-                          "warning")
+        if is_manual:
+            _safe_log(self.log,
+                      self._t('log_cookie_none',
+                              'No matching cookies found. File may be wrong.\n'),
+                      "warning")
 
-        if cookie_src == "file" and cookie_path:
-            try:
-                _safe_log(self.log,
-                          self._t('log_cookie_filter',
-                                  '>>> Filtering cookies for target host: {host}...\n', host=""),
-                          "info")
-                cookie_str = parse_cookie_file(cookie_path, url)
-                if cookie_str:
-                    _safe_log(self.log,
-                              self._t('log_cookie_match',
-                                      '>>> Loaded {count} cookies from file\n', count=len(cookie_str)),
-                              "success")
-                    return cookie_str, cookie_path, None
-                else:
-                    _safe_log(self.log,
-                              self._t('log_cookie_none',
-                                      ' No cookies found for {host}. Falling back to direct download.', host=""),
-                              "warning")
-            except Exception as e:
-                _safe_log(self.log,
-                          self._t('log_cookie_parse_error',
-                                  '>>> Failed to parse cookie file: {e}\n', e=e),
-                          "warning")
+        if os.path.isfile(cookie_path):
+            _safe_log(self.log,
+                      self._t('log_cookie_file_fallback',
+                              '>>> Passing cookie file directly to downloader\n'),
+                      "info")
+            return None, cookie_path, None
 
         # 浏览器 Cookie 回退
         if cookie_src in ("chrome", "edge", "firefox", "safari"):
@@ -270,7 +284,7 @@ class DownloaderEngine:
                       self._t('log_cookie_fallback_browser',
                               '>>> Cookie cache miss, falling back to browser extraction (slow)\n'),
                       "warning")
-            return None, None, cookie_src  # 返回浏览器名，让调用方决定如何使用
+            return None, None, cookie_src  # return browser fallback if cache miss
 
         return None, None, None
 
@@ -278,7 +292,8 @@ class DownloaderEngine:
                               cookie_str: str | None,
                               cookie_file_path: str | None,
                               browser_fallback: str | None,
-                              url: str):
+                              url: str,
+                              bootstrap_attempted=False):
         """
         根据引擎类型，将 Cookie 注入到命令中
         """
@@ -287,33 +302,63 @@ class DownloaderEngine:
                 header = f"Cookie: {cookie_str}"
                 cmd.extend(["--header", header])
             else:
-                if cookie_file_path:
+                if cookie_file_path and os.path.isfile(cookie_file_path):
                     cmd.extend(["--cookies", cookie_file_path])
                 else:
                     # fallback to header injection if cookie file is not available (e.g. from browser bootstrap)
                     cmd.extend(["--add-header", f"Cookie: {cookie_str}"])
             return
 
-        # 无 cookie_str，尝试浏览器回退（仅 yt-dlp 支持）
-        if browser_fallback and engine != "re":
-            if _is_twitter_url(url):
-                _safe_log(self.log,
-                          self._t('log_cookie_from_browser',
-                                  '>>> Using browser cookies: {browser}\n',
-                                  browser=browser_fallback),
-                          "info")
-            cmd.extend(["--cookies-from-browser", browser_fallback])
-        elif browser_fallback and engine == "re":
-            _safe_log(self.log,
-                      self._t('log_re_no_browser',
-                              '⚠️ RE engine does not support browser cookies.'),
-                      "warning")
+        # no cookie_str available, but cookie_file_path exists (e.g. from browser bootstrap), use it if supported
+        if cookie_file_path and os.path.isfile(cookie_file_path):
+            if engine == "re":
+                # RE 不支持 --cookies，需要读取文件手动注入 header
+                try:
+                    from utils import parse_cookie_file_all
+                    cookie_str = parse_cookie_file_all(cookie_file_path)
+                    if cookie_str:
+                        cmd.extend(["--header", f"Cookie: {cookie_str}"])
+                except Exception:
+                    pass
+            else:
+                cmd.extend(["--cookies", cookie_file_path])
+            return
 
-        elif not browser_fallback and engine != "re" and _is_twitter_url(url):
+        # no cookie_str or cookie_file_path, but browser fallback is available
+        if browser_fallback:
             _safe_log(self.log,
-                      self._t('log_cookie_none',
-                              '⚠️ Twitter/X requires browser cookies for authenticated access.'),
-                      "warning")
+                      self._t('log_cookie_from_browser',
+                              '>>> Using browser cookies: {browser}\n',
+                              browser=browser_fallback),
+                      "info")
+            if engine != "re":
+                cmd.extend(["--cookies-from-browser", browser_fallback])
+            else:
+                if bootstrap_attempted:
+                    _safe_log(self.log,
+                              self._t('log_re_no_browser',
+                                      'Cookie extraction failed. '
+                                      'Try exporting cookies.txt manually.\n'),
+                              "warning")
+                # RE doesn't support --cookies-from-browser, need to bootstrap and inject as header
+                else:
+                    bootstrapped_path = self._bootstrap_cookies_from_browser(browser_fallback, url)
+                    if bootstrapped_path and os.path.isfile(bootstrapped_path):
+                        try:
+                            from utils import parse_cookie_file_all
+                            cookie_str = parse_cookie_file_all(bootstrapped_path)
+                            if cookie_str:
+                                cmd.extend(["--header", f"Cookie: {cookie_str}"])
+                                return
+                        except Exception:
+                            pass
+
+                    _safe_log(self.log,
+                              self._t('log_re_no_browser',
+                                      'Failed to extract cookies for RE engine. '
+                                      'Try exporting cookies.txt manually.\n'),
+                              "warning")
+
 
     # -------- i18n helpers (UI-facing logs only) --------
     def set_language(self, lang: str):
@@ -364,24 +409,27 @@ class DownloaderEngine:
             - cookie_header_str: the actual "Cookie: k=v; ..." string injected into headers (for logging display), or None if no cookies used
         """
 
-        print(f"[DEBUG _build_command] INITIAL cookie_path='{cookie_path}' (type={type(cookie_path)})")
-        print(f"[DEBUG _build_command] not cookie_path = {not cookie_path}")
-        print(
-            f"[DEBUG _build_command] cookie_src in browsers = {cookie_src in ('chrome', 'edge', 'firefox', 'safari')}")
+        #print(f"[DEBUG _build_command] INITIAL cookie_path='{cookie_path}' (type={type(cookie_path)})")
+        #print(f"[DEBUG _build_command] not cookie_path = {not cookie_path}")
+        #print(
+        #    f"[DEBUG _build_command] cookie_src in browsers = {cookie_src in ('chrome', 'edge', 'firefox', 'safari')}")
 
+        bootstrap_attempted = False
 
         if not cookie_path and cookie_src in ("chrome", "edge", "firefox", "safari"):
-            print(f"[DEBUG _build_command] ENTERING bootstrap...")
+            #print(f"[DEBUG _build_command] ENTERING bootstrap...")
             bootstrap_browser = cookie_src
             cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
-            print(f"[DEBUG _build_command] bootstrap returned: '{cookie_path}'")
-        else:
-            print(f"[DEBUG _build_command] SKIPPED bootstrap")
+            bootstrap_attempted = True
+            #print(f"[DEBUG _build_command] bootstrap returned: '{cookie_path}'")
+        #else:
+        #    print(f"[DEBUG _build_command] SKIPPED bootstrap")
 
-        print(f"[DEBUG _build_command] after bootstrap: cookie_path={cookie_path}")
-        print(f"[DEBUG _build_command] cookie_src={cookie_src}, engine={engine}")
+        #print(f"[DEBUG _build_command] after bootstrap: cookie_path={cookie_path}")
+        #print(f"[DEBUG _build_command] cookie_src={cookie_src}, engine={engine}")
 
-        cookie_str, cookie_file, browser_fallback = self._resolve_cookie(cookie_src, cookie_path, url)
+        cookie_str, cookie_file, browser_fallback = \
+            self._resolve_cookie(cookie_src, cookie_path, url, engine=engine)
 
         if engine == "re":
             cmd, cookie_header = self._build_re_command(url, save_dir, threads)
@@ -390,7 +438,7 @@ class DownloaderEngine:
         else:
             cmd, cookie_header = self._build_ytdlp_command(url, save_dir, aria2=False, threads=threads)
 
-        self._inject_cookie_to_cmd(cmd, engine, cookie_str, cookie_file, browser_fallback, url)
+        self._inject_cookie_to_cmd(cmd, engine, cookie_str, cookie_file, browser_fallback, url, bootstrap_attempted=bootstrap_attempted)
 
         if cookie_str and engine == "re":
             cookie_header = f"Cookie: {cookie_str}"
