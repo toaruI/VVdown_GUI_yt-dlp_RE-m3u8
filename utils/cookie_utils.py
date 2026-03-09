@@ -46,6 +46,11 @@ def _load_persistent_cache() -> dict:
 
 
 def _save_persistent_cache(cache: dict):
+    if len(cache) > COOKIE_CACHE_MAX_ENTRIES:
+        keys = list(cache.keys())
+        for k in keys[:-COOKIE_CACHE_MAX_ENTRIES]:
+            del cache[k]
+
     path = _get_persistent_cache_path()
     try:
         path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")

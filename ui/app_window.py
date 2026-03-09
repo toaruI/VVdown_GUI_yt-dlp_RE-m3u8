@@ -33,93 +33,103 @@ class MainWindow(QWidget):
     RESIZE_BORDER = 6
     NORMAL_MARGINS = (6, 6, 6, 6)  # >= RESIZE_BORDER
     MAXIMIZED_MARGINS = (0, 0, 0, 0)
+    LOG_PREFIX = {"error": "❌ ", "success": "✅ ", "warning": "⚠️ "}
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self._setup_window()
+        self._load_config()
+        self._init_runtime_state()
+        self._setup_environment()
+        self._init_managers()
+        self._init_core_engines()
+        self._build_ui()
+        self._apply_initial_state()
+        self._connect_signals()
+
+    def _setup_window(self):
         self.setObjectName("MainWindow")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setStyleSheet("QWidget#MainWindow { background-color: rgba(0, 0, 0, 1); }")
         self.setAttribute(Qt.WA_NoSystemBackground, True)
-
+        self.setMouseTracking(True)
         try:
             QApplication.setStyle("Fusion")
         except Exception:
             pass
 
+    def _load_config(self):
         self.system = SYSTEM
-
-        # ---- config ----
         self.config_data = load_user_config()
         self.lang = self.config_data.get("lang", "en")
         self.theme = self.config_data.get("theme", "dark")
-        self.download_dir = self.config_data.get("download_dir", os.path.expanduser("~/Downloads"))
+        self.download_dir = self.config_data.get(
+            "download_dir", os.path.expanduser("~/Downloads")
+        )
         self.cookie_file_path = self.config_data.get("cookie_path", "")
+        self.cookie_source = self._resolve_default_cookie()
 
-        default_cookie = self.config_data.get("cookie_source")
-        if not default_cookie:
-            if self.system == "Darwin":
-                default_cookie = "safari"
-            elif self.system == "Windows":
-                default_cookie = "chrome"
-            else:
-                default_cookie = "firefox"
-        self.cookie_source = default_cookie
+    def _resolve_default_cookie(self) -> str:
+        source = self.config_data.get("cookie_source")
+        if source:
+            return source
+        defaults = {"Darwin": "safari", "Windows": "chrome"}
+        return defaults.get(self.system, "firefox")
 
-        # ---- env ----
+    def _init_runtime_state(self):
+        """presume nothing is correct and prepare for all scenarios, including first run with missing deps"""
+        self._win_cookie_warned: bool = False
+        self._local_cookie_warned: bool = False
+        self._last_lang_logged: str | None = None
+        self._hover_fix_applied: bool = False
+        self._aria2_available: bool = True
+        self.download_controller = None
+        self.resize_handler = None
+
+    def _setup_environment(self):
         setup_env_path()
         self.font_ui, self.font_bold, self.font_log = setup_styles(self.system)
         self.cmd_key = "Command" if self.system == "Darwin" else "Control"
 
-        # ---- Handlers Initialization (early so ui setup can access them if needed) ----
+    def _init_managers(self):
         self.theme_manager = ThemeManager(self)
         self.cookie_manager = CookieManager(self)
         self.ui_state_manager = UIStateManager(self)
         self.dependency_handler = DependencyHandler(self)
         self.download_handler = DownloadHandler(self)
+        self.resize_handler = ResizeHandler(self, border_width=self.RESIZE_BORDER)
 
-        # ---- core ----
-        self.download_controller = None
+    def _init_core_engines(self):
         self.downloader = DownloaderEngine(
             self.log_thread_safe,
             translations=TRANSLATIONS,
             lang=self.lang,
         )
         self.downloader.on_done = self.on_download_done
-
         self.installer = DependencyInstaller(
             self.log_thread_safe,
             translations=TRANSLATIONS,
             lang=self.lang,
         )
-
-        self._aria2_available = True
         self.threadpool = QThreadPool.globalInstance()
 
-        self.NORMAL_MARGINS = (2, 2, 2, 2)
-        self.MAXIMIZED_MARGINS = (0, 0, 0, 0)
-
-        # ---- ui ----
-        self._build_ui()
-
-        # ---- theme ----
+    def _apply_initial_state(self):
         self.theme_manager.apply_full_theme(first_time=False)
         self.update_config("theme", self.theme)
-
         self.ui_state_manager.restore_config_state()
         self.dependency_handler.check_deps_on_start()
-
-        # Connect Signals
-        self.log_signal.connect(self._append_log)
-        self.download_finished_signal.connect(self.download_handler.handle_download_done)
-        self.installer_finished_signal.connect(self.dependency_handler.on_installer_finished)
-
-        # Ensure download button state is correct on startup
         self.cookie_manager.update_download_enabled()
 
-        # Resize handling
-        self.resize_handler = ResizeHandler(self, border_width=self.RESIZE_BORDER)
-        self.setMouseTracking(True)
+    def _connect_signals(self):
+        self.log_signal.connect(self._append_log)
+        self.download_finished_signal.connect(
+            self.download_handler.handle_download_done
+        )
+        self.installer_finished_signal.connect(
+            self.dependency_handler.on_installer_finished
+        )
 
     # ---------------- helpers ----------------
     def get_current_trans(self):
@@ -209,19 +219,20 @@ class MainWindow(QWidget):
     # ---- mouse events ----
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton and self.resize_handler:
             if self.resize_handler.try_start_resize(event):
                 return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.resize_handler.handle_resize(event):
-            return
-        if not event.buttons():
-            self.resize_handler.update_cursor(event.pos())
+        if self.resize_handler:
+            if self.resize_handler.handle_resize(event):
+                return
+            if not event.buttons():
+                self.resize_handler.update_cursor(event.pos())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self.resize_handler.end_resize():
+        if self.resize_handler and self.resize_handler.end_resize():
             return
         super().mouseReleaseEvent(event)

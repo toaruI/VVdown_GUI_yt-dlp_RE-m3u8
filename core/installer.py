@@ -73,6 +73,7 @@ class DependencyInstaller:
         self.system = SYSTEM
         # 初始化资源提供者，决定下载源
         self.resource = ResourceProvider(is_cn_mode)
+        self._last_progress_log: float = 0.0
 
     # -------- i18n helpers --------
     def set_language(self, lang: str):
@@ -413,8 +414,7 @@ class DependencyInstaller:
                                 elapsed = time.time() - start
                                 speed = downloaded / 1024 / max(elapsed, 0.1)
                                 now = time.time()
-                                if not hasattr(self, "_last_progress_log") or now - getattr(self,
-                                                                                            "_last_progress_log") > 0.5:
+                                if now - self._last_progress_log > 0.5:
                                     self._last_progress_log = now
                                     _log_raw(
                                         self.log,
@@ -500,7 +500,6 @@ class DependencyInstaller:
             status["yt-dlp"] = True
         else:
             # fallback to system PATH (brew / winget / distro)
-            import shutil
             status["yt-dlp"] = shutil.which("yt-dlp") is not None
 
         # -------- ffmpeg --------
@@ -509,7 +508,6 @@ class DependencyInstaller:
         if os.path.exists(ffmpeg_bin):
             status["ffmpeg"] = True
         else:
-            import shutil
             status["ffmpeg"] = shutil.which("ffmpeg") is not None
 
         # -------- aria2 --------
@@ -518,7 +516,6 @@ class DependencyInstaller:
         if os.path.exists(aria2_bin):
             status["aria2"] = True
         else:
-            import shutil
             status["aria2"] = shutil.which("aria2c") is not None
 
         # -------- N_m3u8DL-RE --------
