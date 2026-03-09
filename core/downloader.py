@@ -11,6 +11,15 @@ from utils import parse_cookie_file, is_cmd_available
 
 LogCb = Callable[[str, Optional[str]], None]
 
+def _raise_fd_limit():
+    """increase file descriptor limit on Unix-like systems to avoid
+    "Too many open files" errors during downloads with many segments"""
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (min(hard, 10240), hard))
+    except Exception:
+        pass
 
 def _safe_log(log_cb: LogCb, text: str, tag: Optional[str] = None):
     try:
@@ -548,7 +557,8 @@ class DownloaderEngine:
                 encoding='utf-8',
                 errors='replace',
                 startupinfo=self.startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW if self.system == "Windows" else 0
+                creationflags=subprocess.CREATE_NO_WINDOW if self.system == "Windows" else 0,
+                preexec_fn = None if IS_WIN else _raise_fd_limit,
             )
             if controller:
                 controller._set_proc(proc)
