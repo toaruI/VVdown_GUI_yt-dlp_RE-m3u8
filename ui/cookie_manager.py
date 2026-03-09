@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
 import webbrowser
+
 from PySide6.QtWidgets import QFileDialog
+
 from utils import resolve_cookie_plugin_url
+
 
 class CookieManager:
     def __init__(self, main_window):
@@ -44,7 +47,7 @@ class CookieManager:
             )
             if not getattr(self.mw, "_win_cookie_warned", False):
                 self.mw._win_cookie_warned = True
-                self.mw.log_thread_safe(msg + "\\n", "warning")
+                self.mw.log_thread_safe(msg + "\n", "warning")
             return
 
         if local_file_missing:
@@ -56,7 +59,7 @@ class CookieManager:
             )
             if not getattr(self.mw, "_local_cookie_warned", False):
                 self.mw._local_cookie_warned = True
-                self.mw.log_thread_safe(msg + "\\n", "warning")
+                self.mw.log_thread_safe(msg + "\n", "warning")
             return
 
         self.mw.download_btn.setEnabled(True)
@@ -78,7 +81,7 @@ class CookieManager:
             prefer="cookies_txt",
         )
         if not url:
-            self.mw.log_thread_safe("No suitable cookies.txt exporter found for this browser.\\n", "warning")
+            self.mw.log_thread_safe("No suitable cookies.txt exporter found for this browser.\n", "warning")
             return
         webbrowser.open(url)
 
@@ -89,6 +92,6 @@ class CookieManager:
             prefer="catcatch",
         )
         if not url:
-            self.mw.log_thread_safe("CatCatch is not available for this browser.\\n", "warning")
+            self.mw.log_thread_safe("CatCatch is not available for this browser.\n", "warning")
             return
         webbrowser.open(url)

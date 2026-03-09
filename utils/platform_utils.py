@@ -6,18 +6,6 @@ import sys
 
 from config.config import IS_MAC, IS_WIN
 
-
-def get_base_path():
-    """
-    Return the base directory of the application:
-    - If running as a PyInstaller frozen executable, return the directory of the executable
-    - Otherwise, return the directory of this file (project package root)
-    """
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
-
-
 def setup_env_path():
     """
     On macOS, append common Homebrew paths to PATH.

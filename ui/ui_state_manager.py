@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import os
-from PySide6.QtCore import QTimer
-from config.config import IS_MAC
+
+from PySide6.QtCore import QTimer, QEvent
+from PySide6.QtWidgets import QWidget, QApplication, QAbstractItemView
+
 
 class UIStateManager:
     def __init__(self, main_window):
@@ -88,19 +90,22 @@ class UIStateManager:
 
         self.mw.lbl_log.setText(t["label_log"])
 
-        if getattr(self.mw, "_last_lang_logged", None) != self.mw.lang:
-            self.mw._last_lang_logged = self.mw.lang
+        old_lang = getattr(self.mw, "_last_lang_logged", None)
+
+        if old_lang is not None and old_lang != self.mw.lang:
             try:
                 msg = t.get("log_language_switched")
                 if not msg:
-                    msg = ">>> Language switched to {}\\n"
+                    msg = ">>> Language switched to {}\n"
                 self.mw.log_thread_safe(msg.format(self.mw.lang), "info")
             except Exception:
                 pass
 
+        self.mw._last_lang_logged = self.mw.lang
+
         self.toggle_engine_ui()
 
-        if self.mw.download_controller and self.mw.download_controller._proc:
+        if self.mw.is_downloading():
             self.mw.download_btn.setText(t["btn_stop"])
         else:
             self.mw.download_btn.setText(t["btn_start"])
@@ -129,3 +134,52 @@ class UIStateManager:
 
         if is_re and self.mw.cookie_source in {"chrome", "edge", "firefox", "safari"}:
             self.mw.rb_guest.setChecked(True)
+
+    def apply_mac_hover_fix(self):
+        self._enable_mouse_tracking(self.mw)
+        QApplication.processEvents()
+        self.mw.activateWindow()
+        self.mw.raise_()
+        QTimer.singleShot(0, self._force_style_refresh)
+
+    def _enable_mouse_tracking(self, widget: QWidget):
+        widget.setMouseTracking(True)
+        for child in widget.findChildren(QWidget):
+            child.setMouseTracking(True)
+
+    def _force_style_refresh(self):
+        QApplication.sendEvent(
+            self.mw,
+            QEvent(QEvent.LayoutRequest)
+        )
+
+        for child in self.mw.findChildren(QWidget):
+            try:
+                if isinstance(child, QAbstractItemView):
+                    child.viewport().update()
+                else:
+                    child.update()
+            except TypeError:
+                try:
+                    child.repaint()
+                except Exception:
+                    pass
+        self.mw.update()
+        self.mw.repaint()
+
+    def toggle_maximize(self):
+        if self.mw.isMaximized() or self.mw.isFullScreen():
+            self.mw.showNormal()
+            self.mw.layout().setContentsMargins(*self.mw.NORMAL_MARGINS)
+
+            if hasattr(self.mw, 'title_bar'):
+                self.mw.title_bar.update_maximize_icon(False)
+        else:
+            self.mw.layout().setContentsMargins(*self.mw.MAXIMIZED_MARGINS)
+            if getattr(self.mw, "system", "") == "Darwin":
+                self.mw.showFullScreen()
+            else:
+                self.mw.showMaximized()
+
+            if hasattr(self.mw, 'title_bar'):
+                self.mw.title_bar.update_maximize_icon(True)

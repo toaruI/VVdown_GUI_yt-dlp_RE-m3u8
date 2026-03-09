@@ -2,9 +2,9 @@
 """
 PySide6 UI helpers — premium widgets and global styles.
 """
-from PySide6.QtCore import QObject, Qt
-from PySide6.QtGui import QFont, QPalette
-from PySide6.QtWidgets import QLineEdit, QComboBox
+from PySide6.QtCore import QObject, Qt, QEvent
+from PySide6.QtGui import QFont, QKeySequence
+from PySide6.QtWidgets import QLineEdit, QComboBox, QApplication
 
 
 def setup_styles(system_name):
@@ -54,18 +54,31 @@ class ThemedComboBox(QComboBox):
             popup.setFixedWidth(self.width())
 
 
-
-
 class PasteFix(QObject):
     """Small helper to normalize paste behavior on QLineEdit."""
 
     def __init__(self, line_edit: QLineEdit, cmd_key="Control"):
         super().__init__(line_edit)
         self._le = line_edit
+        self._cmd_key = cmd_key
         self._le.installEventFilter(self)
 
     def eventFilter(self, obj, event):
+        if obj is self._le and event.type() == QEvent.KeyPress:
+            if event.matches(QKeySequence.Paste):
+                self._handle_paste()
+                return True
         return super().eventFilter(obj, event)
+
+    def _handle_paste(self):
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+        if text:
+            cleaned = text.strip()
+            if self._le.hasSelectedText():
+                self._le.insert(cleaned)
+            else:
+                self._le.insert(cleaned)
 
 
 # ---------------------------------------------------------------------------

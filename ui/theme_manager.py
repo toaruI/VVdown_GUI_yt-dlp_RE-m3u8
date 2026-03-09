@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtGui import QPalette
-from PySide6.QtCore import Qt
 import qdarktheme
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QApplication, QWidget
+
 from .widgets import apply_global_style
+
 
 class ThemeManager:
     def __init__(self, main_window):
@@ -20,18 +22,15 @@ class ThemeManager:
         pal = qdarktheme.load_palette(self.mw.theme)
         bg = pal.color(QPalette.Window).name()
 
-        if self.mw.theme == "dark":
-            border_color = "rgba(255, 255, 255, 0.08)"
-        else:
-            border_color = "rgba(0, 0, 0, 0.12)"
-
-        self.mw._content.setStyleSheet(f"""
-            QWidget#MainWindowRoot {{
-                background-color: {bg};
-                border: 1px solid {border_color};
-                border-radius: 14px;
-            }}
-        """)
+        if hasattr(self.mw, "_content"):
+            self.mw._content.setStyleSheet(f"""
+                QWidget#MainWindowRoot {{
+                    background-color: {bg};
+                    border: none;
+                    border-radius: 14px;
+                    outline: none;
+                }}
+            """)
 
         # FORCE transparency on the outer container.
         # We REMOVE setAutoFillBackground and the solid QMainWindow stylesheet
@@ -54,20 +53,17 @@ class ThemeManager:
 
             if cw is not None:
                 cw.setAttribute(Qt.WA_StyledBackground, True)
-                cw.setAutoFillBackground(True)
-                cw_pal = cw.palette()
-                cw_pal.setColor(QPalette.Window, pal.color(QPalette.Window))
-                cw.setPalette(cw_pal)
-            
+                cw.setAutoFillBackground(False)
+
             # Explicitly force the top-level container to be transparent via CSS
             # Using QWidget#MainWindow targets our main window without affecting children.
             self.mw.setStyleSheet("QWidget#MainWindow { background: transparent; border: none; }")
         except Exception:
             pass
-        
+
         if hasattr(self.mw, "title_bar"):
             self.mw.title_bar.update_title_color()
-        
+
         self.deep_refresh(self.mw)
 
     @staticmethod
@@ -80,10 +76,10 @@ class ThemeManager:
         widget.update()
 
     def change_theme(self):
-        current_text = self.mw.theme_combo.currentText()
-        if current_text == "Auto":
+        current_idx = self.mw.theme_combo.currentIndex()
+        if current_idx == 0:
             new_theme = "auto"
-        elif current_text == "Dark":
+        elif current_idx == 1:
             new_theme = "dark"
         else:
             new_theme = "light"
@@ -94,7 +90,7 @@ class ThemeManager:
         self.mw.theme = new_theme
         self.apply_full_theme()
         self.mw.update_config("theme", self.mw.theme)
-        
+
         # We need UI manager to refresh text, but can assume mw handles routing
         if hasattr(self.mw, "ui_state_manager"):
             self.mw.ui_state_manager.refresh_text()
