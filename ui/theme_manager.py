@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtGui import QPalette
-from PySide6.QtCore import Qt
 import qdarktheme
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QApplication, QWidget
+
 from .widgets import apply_global_style
+
 
 class ThemeManager:
     def __init__(self, main_window):
@@ -24,7 +26,7 @@ class ThemeManager:
             self.mw._content.setStyleSheet(f"""
                 QWidget#MainWindowRoot {{
                     background-color: {bg};
-                    border: 1px solid {bg};
+                    border: none;
                     border-radius: 14px;
                     outline: none;
                 }}
@@ -58,10 +60,10 @@ class ThemeManager:
             self.mw.setStyleSheet("QWidget#MainWindow { background: transparent; border: none; }")
         except Exception:
             pass
-        
+
         if hasattr(self.mw, "title_bar"):
             self.mw.title_bar.update_title_color()
-        
+
         self.deep_refresh(self.mw)
 
     @staticmethod
@@ -88,7 +90,7 @@ class ThemeManager:
         self.mw.theme = new_theme
         self.apply_full_theme()
         self.mw.update_config("theme", self.mw.theme)
-        
+
         # We need UI manager to refresh text, but can assume mw handles routing
         if hasattr(self.mw, "ui_state_manager"):
             self.mw.ui_state_manager.refresh_text()

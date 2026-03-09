@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
 import webbrowser
+
 from PySide6.QtWidgets import QFileDialog
+
 from utils import resolve_cookie_plugin_url
+
 
 class CookieManager:
     def __init__(self, main_window):

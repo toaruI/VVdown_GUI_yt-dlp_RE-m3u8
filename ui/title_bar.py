@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QSizePolicy
 from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QSizePolicy
+
 from config.config import IS_MAC
+
 
 # --- Custom Frameless Title Bar (platform-aware) ---
 class TitleBar(QWidget):

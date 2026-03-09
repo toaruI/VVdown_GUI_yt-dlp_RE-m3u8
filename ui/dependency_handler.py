@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 import threading
+
 from PySide6.QtCore import QTimer
+
 from config.config import IS_MAC
+
 
 class DependencyHandler:
     def __init__(self, main_window):

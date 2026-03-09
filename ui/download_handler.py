@@ -65,7 +65,7 @@ class DownloadHandler:
         is_re = ("re" in engine_text)
         if is_re:
             ul = url.lower()
-            if not(ul.endswith('.m3u8') or ul.endswith('.mpd') or 'm3u8' in ul):
+            if not (ul.endswith('.m3u8') or ul.endswith('.mpd') or 'm3u8' in ul):
                 msg = t.get(
                     "log_re_requires_m3u8",
                     "RE engine requires a direct m3u8/mpd URL. Please use yt-dlp for webpage URLs."

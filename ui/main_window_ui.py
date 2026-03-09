@@ -3,11 +3,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QGroupBox, QRadioButton, QPlainTextEdit,
-    QSpinBox, QButtonGroup, QSizeGrip
+    QSpinBox, QButtonGroup
 )
+
 from utils import open_download_folder
-from .widgets import PasteFix, ThemedComboBox
 from .title_bar import TitleBar
+from .widgets import PasteFix, ThemedComboBox
+
 
 class MainWindowUI:
     """UI builder class for MainWindow."""
@@ -22,7 +24,7 @@ class MainWindowUI:
 
         root = QVBoxLayout(main_window)
         # Margin around content allows shadow to render
-        root.setContentsMargins(2, 2, 2, 2)
+        root.setContentsMargins(*main_window.NORMAL_MARGINS)
 
         # real content container for translucent window
         main_window._content = QWidget(main_window)
@@ -114,12 +116,14 @@ class MainWindowUI:
         main_window.rb_safari = QRadioButton("Safari")
         main_window.rb_file = QRadioButton(t["mode_local_file"])
 
-        for rb in [main_window.rb_guest, main_window.rb_chrome, main_window.rb_edge, main_window.rb_firefox, main_window.rb_safari, main_window.rb_file]:
+        for rb in [main_window.rb_guest, main_window.rb_chrome, main_window.rb_edge, main_window.rb_firefox,
+                   main_window.rb_safari, main_window.rb_file]:
             hl.addWidget(rb)
 
         # Enforce exclusive radios (Qt fix, Tk semantics)
         main_window.cookie_group = QButtonGroup(main_window)
-        for rb in [main_window.rb_guest, main_window.rb_chrome, main_window.rb_edge, main_window.rb_firefox, main_window.rb_safari, main_window.rb_file]:
+        for rb in [main_window.rb_guest, main_window.rb_chrome, main_window.rb_edge, main_window.rb_firefox,
+                   main_window.rb_safari, main_window.rb_file]:
             main_window.cookie_group.addButton(rb)
 
         # default selection (v6multi exact)
