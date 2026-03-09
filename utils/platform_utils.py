@@ -2,7 +2,7 @@
 # Cross-platform helpers for filesystem, PATH setup, and command availability
 import os
 import subprocess
-import sys
+import shutil
 
 from config.config import IS_MAC, IS_WIN
 
@@ -62,6 +62,8 @@ def is_cmd_available(cmd: str) -> bool:
     """
     if not cmd:
         return False
+    if shutil.which(cmd):
+        return True
     try:
         subprocess.run(
             [cmd, "--version"],

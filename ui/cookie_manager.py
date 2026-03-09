@@ -42,8 +42,10 @@ class CookieManager:
             self.mw.download_btn.setEnabled(False)
             t = self.mw.get_current_trans()
             msg = t.get(
-                "log_win_browser_cookie_unsupported",
-                "Browser cookies are not supported on Windows. Please use Local Cookie File."
+                "log_win_browser_cookie_guide",
+                "⚠️ Windows cannot extract browser cookies directly.\n"
+                "Please use 'Get cookies.txt' button to install the browser extension,\n"
+                "then export cookies and select 'Local File' mode."
             )
             if not getattr(self.mw, "_win_cookie_warned", False):
                 self.mw._win_cookie_warned = True

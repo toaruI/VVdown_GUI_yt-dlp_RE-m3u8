@@ -50,6 +50,15 @@ class ThemedComboBox(QComboBox):
         if popup:
             pos = self.mapToGlobal(self.rect().bottomLeft())
             pos.setY(pos.y() + 2)
+
+            screen = self.screen()
+            if screen:
+                screen_geo = screen.availableGeometry()
+                popup_height = popup.sizeHint().height()
+                if pos.y() + popup_height > screen_geo.bottom():
+                     above_y = self.mapToGlobal(self.rect().topLeft()).y() - popup_height - 2
+                     pos.setY(max(above_y, screen_geo.top()))
+
             popup.move(pos)
             popup.setFixedWidth(self.width())
 

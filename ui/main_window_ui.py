@@ -6,261 +6,319 @@ from PySide6.QtWidgets import (
     QSpinBox, QButtonGroup
 )
 
-from utils import open_download_folder
-from .title_bar import TitleBar
 from .widgets import PasteFix, ThemedComboBox
+from .title_bar import TitleBar
 
 
 class MainWindowUI:
     """UI builder class for MainWindow."""
 
-    def setup_ui(self, main_window):
-        t = main_window.get_current_trans()
-        display_name = "macOS" if main_window.system == "Darwin" else main_window.system
-        main_window.setWindowTitle(f"{t['title']} ({display_name})")
-        main_window.resize(740, 820 if main_window.system == "Darwin" else 780)
+    def setup_ui(self, mw):
+        t = mw.get_current_trans()
+        display_name = "macOS" if mw.system == "Darwin" else mw.system
+        mw.setWindowTitle(f"{t['title']} ({display_name})")
+        size = mw.DEFAULT_WINDOW_SIZE_MAC if mw.system == "Darwin" else mw.DEFAULT_WINDOW_SIZE
+        mw.resize(*size)
+        mw.setMinimumSize(*mw.MIN_WINDOW_SIZE)
 
-        main_window.setMinimumSize(720, 600)
+        self._setup_root_layout(mw)
+        self._setup_title_bar(mw)
+        self._setup_top_bar(mw, t)
+        self._setup_url_section(mw, t)
+        self._setup_cookie_section(mw, t)
+        self._setup_helper_buttons(mw, t)
+        self._apply_windows_font_fix(mw)
+        self._setup_engine_controls(mw, t)
+        self._setup_download_button(mw, t)
+        self._setup_log_section(mw, t)
+        self._connect_cookie_signals(mw)
 
-        root = QVBoxLayout(main_window)
-        # Margin around content allows shadow to render
-        root.setContentsMargins(*main_window.NORMAL_MARGINS)
+    # ================================================================
+    # Root Layout
+    # ================================================================
 
-        # real content container for translucent window
-        main_window._content = QWidget(main_window)
-        main_window._content.setObjectName("MainWindowRoot")
-        main_window._content.setAutoFillBackground(False)
-        main_window._content.setAttribute(Qt.WA_StyledBackground, True)
+    def _setup_root_layout(self, mw):
+        root = QVBoxLayout(mw)
+        root.setContentsMargins(*mw.NORMAL_MARGINS)
 
-        content_layout = QVBoxLayout(main_window._content)
-        content_layout.setContentsMargins(10, 6, 10, 10)
-        content_layout.setSpacing(8)
+        mw._content = QWidget(mw)
+        mw._content.setObjectName("MainWindowRoot")
+        mw._content.setAutoFillBackground(False)
+        mw._content.setAttribute(Qt.WA_StyledBackground, True)
 
-        root.addWidget(main_window._content)
-        # Custom title bar
-        main_window.title_bar = TitleBar(main_window)
-        content_layout.addWidget(main_window.title_bar)
-        # Remove default margins to avoid white bands in dark mode
-        # (already set above)
+        self._content_layout = QVBoxLayout(mw._content)
+        self._content_layout.setContentsMargins(10, 6, 10, 10)
+        self._content_layout.setSpacing(8)
 
-        # top bar
+        root.addWidget(mw._content)
+
+    # ================================================================
+    # Title Bar
+    # ================================================================
+
+    def _setup_title_bar(self, mw):
+        mw.title_bar = TitleBar(mw)
+        self._content_layout.addWidget(mw.title_bar)
+
+    # ================================================================
+    # Top Bar: Open Dir / Clear Log / Language / Theme / Fix Deps
+    # ================================================================
+
+    def _setup_top_bar(self, mw, t):
         top = QHBoxLayout()
-        main_window.btn_open = QPushButton(t["btn_open_dir"])
-        main_window.btn_open.setMinimumWidth(120)
-        main_window.btn_open.clicked.connect(lambda: open_download_folder(main_window.download_dir))
-        top.addWidget(main_window.btn_open)
 
-        main_window.btn_clear = QPushButton(t["btn_clear_log"])
-        main_window.btn_clear.setMinimumWidth(100)
-        main_window.btn_clear.clicked.connect(lambda: main_window.log_text.clear())
-        top.addWidget(main_window.btn_clear)
+        mw.btn_open = QPushButton(t["btn_open_dir"])
+        mw.btn_open.setMinimumWidth(120)
+        mw.btn_open.clicked.connect(mw._open_download_folder)
+        top.addWidget(mw.btn_open)
+
+        mw.btn_clear = QPushButton(t["btn_clear_log"])
+        mw.btn_clear.setMinimumWidth(100)
+        mw.btn_open.clicked.connect(mw._open_download_folder)
+        top.addWidget(mw.btn_clear)
 
         top.addStretch()
 
-        # language selector
-        main_window.lang_combo = ThemedComboBox()
-        main_window.lang_combo.setFont(main_window.font_ui)
-        main_window.lang_combo.addItems(["English", "中文"])
-        main_window.lang_combo.setCurrentIndex(0 if main_window.lang == "en" else 1)
-        main_window.lang_combo.currentIndexChanged.connect(main_window.change_language)
+        # ---- Language selector ----
+        mw.lang_combo = ThemedComboBox()
+        mw.lang_combo.setFont(mw.font_ui)
+        mw.lang_combo.addItems(["English", "中文"])
+        mw.lang_combo.setCurrentIndex(0 if mw.lang == "en" else 1)
+        mw.lang_combo.setFixedWidth(110)
+        mw.lang_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+        mw.lang_combo.currentIndexChanged.connect(mw.change_language)
         top.addWidget(QLabel("🌐"))
-        top.addWidget(main_window.lang_combo)
+        top.addWidget(mw.lang_combo)
 
-        # theme selector (dark / light)
-        main_window.theme_combo = ThemedComboBox()
-        main_window.theme_combo.setFont(main_window.font_ui)
-        main_window.theme_combo.addItems(["Auto", "Dark", "Light"])
-        if main_window.theme == "auto":
-            main_window.theme_combo.setCurrentIndex(0)
-        elif main_window.theme == "dark":
-            main_window.theme_combo.setCurrentIndex(1)
-        else:  # light
-            main_window.theme_combo.setCurrentIndex(2)
-        main_window.theme_combo.currentIndexChanged.connect(main_window.change_theme)
+        # ---- Theme selector ----
+        mw.theme_combo = ThemedComboBox()
+        mw.theme_combo.setFont(mw.font_ui)
+        mw.theme_combo.addItems(["Auto", "Dark", "Light"])
+        theme_index = {"auto": 0, "dark": 1, "light": 2}.get(mw.theme, 1)
+        mw.theme_combo.setCurrentIndex(theme_index)
+        mw.theme_combo.setFixedWidth(100)
+        mw.theme_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+        mw.theme_combo.currentIndexChanged.connect(mw.change_theme)
         top.addWidget(QLabel("🎨"))
-        top.addWidget(main_window.theme_combo)
+        top.addWidget(mw.theme_combo)
 
-        # --- ComboBox sizing (language & theme) ---
-        main_window.lang_combo.setFixedWidth(110)
-        main_window.theme_combo.setFixedWidth(100)
-        # Minimum height already set above
+        # ---- Fix dependencies ----
+        mw.install_btn = QPushButton(t["btn_fix_dep"])
+        mw.install_btn.setMinimumWidth(140)
+        mw.install_btn.clicked.connect(mw.run_install)
+        top.addWidget(mw.install_btn)
 
-        # Normalize ComboBox sizing policy (prevent upward popup)
-        main_window.lang_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
-        main_window.theme_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+        self._content_layout.addLayout(top)
 
-        main_window.install_btn = QPushButton(t["btn_fix_dep"])
-        main_window.install_btn.setMinimumWidth(140)
-        main_window.install_btn.clicked.connect(main_window.run_install)
-        top.addWidget(main_window.install_btn)
+    # ================================================================
+    # URL Input
+    # ================================================================
 
-        content_layout.addLayout(top)
+    def _setup_url_section(self, mw, t):
+        mw.url_group = QGroupBox(t["frame_url"])
+        v = QVBoxLayout(mw.url_group)
+        mw.url_entry = QLineEdit()
+        PasteFix(mw.url_entry, mw.cmd_key)
+        v.addWidget(mw.url_entry)
+        self._content_layout.addWidget(mw.url_group)
 
-        # url
-        main_window.url_group = QGroupBox(t["frame_url"])
-        v = QVBoxLayout(main_window.url_group)
-        main_window.url_entry = QLineEdit()
-        PasteFix(main_window.url_entry, main_window.cmd_key)
-        v.addWidget(main_window.url_entry)
-        content_layout.addWidget(main_window.url_group)
+    # ================================================================
+    # Cookie Mode Selection
+    # ================================================================
 
-        # tools
-        main_window.tools_group = QGroupBox(t["frame_tools"])
-        tv = QVBoxLayout(main_window.tools_group)
+    def _setup_cookie_section(self, mw, t):
+        mw.tools_group = QGroupBox(t["frame_tools"])
+        self._tools_layout = QVBoxLayout(mw.tools_group)
+
         hl = QHBoxLayout()
-        # cookie mode radios (v6multi)
-        main_window.rb_guest = QRadioButton(t["mode_guest"])
-        main_window.rb_chrome = QRadioButton("Chrome")
-        main_window.rb_edge = QRadioButton("Edge")
-        main_window.rb_firefox = QRadioButton("Firefox")
-        main_window.rb_safari = QRadioButton("Safari")
-        main_window.rb_file = QRadioButton(t["mode_local_file"])
 
-        for rb in [main_window.rb_guest, main_window.rb_chrome, main_window.rb_edge, main_window.rb_firefox,
-                   main_window.rb_safari, main_window.rb_file]:
+        # ---- Radio buttons ----
+        mw.rb_guest = QRadioButton(t["mode_guest"])
+        mw.rb_chrome = QRadioButton("Chrome")
+        mw.rb_edge = QRadioButton("Edge")
+        mw.rb_firefox = QRadioButton("Firefox")
+        mw.rb_safari = QRadioButton("Safari")
+        mw.rb_file = QRadioButton(t["mode_local_file"])
+
+        all_radios = [
+            mw.rb_guest, mw.rb_chrome, mw.rb_edge,
+            mw.rb_firefox, mw.rb_safari, mw.rb_file,
+        ]
+
+        mw.cookie_group = QButtonGroup(mw)
+        for rb in all_radios:
             hl.addWidget(rb)
+            mw.cookie_group.addButton(rb)
 
-        # Enforce exclusive radios (Qt fix, Tk semantics)
-        main_window.cookie_group = QButtonGroup(main_window)
-        for rb in [main_window.rb_guest, main_window.rb_chrome, main_window.rb_edge, main_window.rb_firefox,
-                   main_window.rb_safari, main_window.rb_file]:
-            main_window.cookie_group.addButton(rb)
-
-        # default selection (v6multi exact)
-        cookie_map = {
-            "none": main_window.rb_guest,
-            "chrome": main_window.rb_chrome,
-            "edge": main_window.rb_edge,
-            "firefox": main_window.rb_firefox,
-            "safari": main_window.rb_safari,
-            "file": main_window.rb_file,
+        # ---- Hide unsupported browsers ----
+        browser_radios = {
+            "chrome": mw.rb_chrome,
+            "edge": mw.rb_edge,
+            "firefox": mw.rb_firefox,
+            "safari": mw.rb_safari,
         }
-        # hide browsers not supported on this OS (v6multi)
-        supported = main_window._os_supported_browsers()
-        if "chrome" not in supported:
-            main_window.rb_chrome.hide()
-        if "edge" not in supported:
-            main_window.rb_edge.hide()
-        if "firefox" not in supported:
-            main_window.rb_firefox.hide()
-        if "safari" not in supported:
-            main_window.rb_safari.hide()
+        supported = mw._os_supported_browsers()
+        for name, rb in browser_radios.items():
+            if name not in supported:
+                rb.hide()
 
-        # sanitize cookie_source if unsupported
-        if main_window.cookie_source not in supported and main_window.cookie_source not in {"file", "none"}:
-            main_window.cookie_source = "none"
+        # ---- Sanitize cookie_source ----
+        if mw.cookie_source not in supported and mw.cookie_source not in {"file", "none"}:
+            mw.cookie_source = "none"
 
-        cookie_map.get(main_window.cookie_source, main_window.rb_guest).setChecked(True)
+        # ---- Default selection ----
+        source_map = {
+            "none": mw.rb_guest, "chrome": mw.rb_chrome,
+            "edge": mw.rb_edge, "firefox": mw.rb_firefox,
+            "safari": mw.rb_safari, "file": mw.rb_file,
+        }
+        source_map.get(mw.cookie_source, mw.rb_guest).setChecked(True)
 
-        # cookie file select
-        main_window.btn_sel_cookie = QPushButton(t["btn_select"])
-        main_window.btn_sel_cookie.clicked.connect(main_window.select_cookie_file)
-        hl.addWidget(main_window.btn_sel_cookie)
+        # ---- File picker ----
+        mw.btn_sel_cookie = QPushButton(t["btn_select"])
+        mw.btn_sel_cookie.clicked.connect(mw.select_cookie_file)
+        mw.btn_sel_cookie.setEnabled(mw.cookie_source == "file")
+        hl.addWidget(mw.btn_sel_cookie)
 
-        # local file label (below file picker, v6multi)
-        main_window.file_label = QLabel(t["status_no_file"])
-        main_window.file_label.setStyleSheet("color:#888")
-        hl.addWidget(main_window.file_label)
+        mw.file_label = QLabel(t["status_no_file"])
+        mw.file_label.setStyleSheet("color:#888")
+        hl.addWidget(mw.file_label)
 
-        tv.addLayout(hl)
+        self._tools_layout.addLayout(hl)
+        self._content_layout.addWidget(mw.tools_group)
 
-        # cookie & m3u8 helpers (v6multi features)
+    # ================================================================
+    # Helper Buttons: cookies.txt exporter / CatCatch
+    # ================================================================
+
+    def _setup_helper_buttons(self, mw, t):
         helper_layout = QHBoxLayout()
 
-        # 1) cookies.txt exporter (for RE)
-        main_window.btn_cookie_plugin = QPushButton(
+        mw.btn_cookie_plugin = QPushButton(
             t.get("btn_cookie_export", "Get cookies.txt")
         )
-        main_window.btn_cookie_plugin.setMinimumWidth(150)
-        main_window.btn_cookie_plugin.clicked.connect(main_window.open_cookie_plugin)
-        helper_layout.addWidget(main_window.btn_cookie_plugin)
+        mw.btn_cookie_plugin.setMinimumWidth(150)
+        mw.btn_cookie_plugin.clicked.connect(mw.open_cookie_plugin)
+        helper_layout.addWidget(mw.btn_cookie_plugin)
 
-        # 2) CatCatch (m3u8 capture)
-        main_window.btn_catcatch = QPushButton(
+        mw.btn_catcatch = QPushButton(
             t.get("btn_catcatch", "Get m3u8 (CatCatch)")
         )
-        main_window.btn_catcatch.setMinimumWidth(150)
-        main_window.btn_catcatch.clicked.connect(main_window.open_catcatch)
-        helper_layout.addWidget(main_window.btn_catcatch)
+        mw.btn_catcatch.setMinimumWidth(150)
+        mw.btn_catcatch.clicked.connect(mw.open_catcatch)
+        helper_layout.addWidget(mw.btn_catcatch)
 
         helper_layout.addStretch()
-        tv.addLayout(helper_layout)
+        self._tools_layout.addLayout(helper_layout)
 
-        content_layout.addWidget(main_window.tools_group)
+    # ================================================================
+    # Windows: Increase button font size
+    # ================================================================
 
-        # Windows: slightly increase button font size for better readability
-        if main_window.system == "Windows":
-            for btn in main_window.findChildren(QPushButton):
-                btn.setStyleSheet(
-                    btn.styleSheet() + " QPushButton { font-size: 13px; }"
-                )
+    def _apply_windows_font_fix(self, mw):
+        if mw.system != "Windows":
+            return
+        for btn in mw.findChildren(QPushButton):
+            btn.setStyleSheet(
+                btn.styleSheet() + " QPushButton { font-size: 13px; }"
+            )
 
-        # controls
+    # ================================================================
+    # Engine / Threads / Save Path
+    # ================================================================
+
+    def _setup_engine_controls(self, mw, t):
         ctrl = QHBoxLayout()
-        ev = QVBoxLayout()
-        main_window.lbl_engine = QLabel(t["label_engine"])
-        ev.addWidget(main_window.lbl_engine)
-        main_window.engine_combo = ThemedComboBox()
-        main_window.engine_combo.setFont(main_window.font_ui)
-        main_window.engine_combo.addItems([t["engine_native"], t["engine_aria2"], t["engine_re"]])
-        main_window.engine_combo.currentIndexChanged.connect(main_window.toggle_engine_ui)
-        main_window.engine_combo.setFont(main_window.font_ui)
-        main_window.engine_combo.setMinimumHeight(28)
-        ev.addWidget(main_window.engine_combo)
 
-        # Normalize ComboBox sizing policy (prevent upward popup)
-        main_window.engine_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+        # ---- Engine + Threads (left side) ----
+        ev = QVBoxLayout()
+
+        mw.lbl_engine = QLabel(t["label_engine"])
+        ev.addWidget(mw.lbl_engine)
+
+        mw.engine_combo = ThemedComboBox()
+        mw.engine_combo.setFont(mw.font_ui)
+        mw.engine_combo.addItems([
+            t["engine_native"], t["engine_aria2"], t["engine_re"]
+        ])
+        mw.engine_combo.setMinimumHeight(28)
+        mw.engine_combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+        mw.engine_combo.currentIndexChanged.connect(mw.toggle_engine_ui)
+        ev.addWidget(mw.engine_combo)
 
         th = QHBoxLayout()
-        main_window.lbl_threads = QLabel(t.get("label_threads", "Threads:"))
-        th.addWidget(main_window.lbl_threads)
-        main_window.thread_spin = QSpinBox()
-        main_window.thread_spin.setRange(1, 64)
-        main_window.thread_spin.setValue(8)
-        main_window.thread_spin.setEnabled(False)
-        th.addWidget(main_window.thread_spin)
+        mw.lbl_threads = QLabel(t.get("label_threads", "Threads:"))
+        th.addWidget(mw.lbl_threads)
+        mw.thread_spin = QSpinBox()
+        mw.thread_spin.setRange(1, 64)
+        mw.thread_spin.setValue(8)
+        mw.thread_spin.setEnabled(False)
+        th.addWidget(mw.thread_spin)
         ev.addLayout(th)
+
         ctrl.addLayout(ev)
 
+        # ---- Save path (right side) ----
         pv = QVBoxLayout()
+
         ph = QHBoxLayout()
-        main_window.lbl_save_path = QLabel(t["label_save_path"])
-        ph.addWidget(main_window.lbl_save_path)
-        main_window.path_label = QLabel(main_window.download_dir[-30:])
-        main_window.path_label.setStyleSheet("color:#007AFF")
-        ph.addWidget(main_window.path_label)
+        mw.lbl_save_path = QLabel(t["label_save_path"])
+        ph.addWidget(mw.lbl_save_path)
+        mw.path_label = QLabel(mw._truncate_path(mw.download_dir))
+        mw.path_label.setStyleSheet("color:#007AFF")
+        ph.addWidget(mw.path_label)
         ph.insertStretch(0, 1)
         pv.addLayout(ph)
-        main_window.btn_path = QPushButton(t["btn_change_path"])
-        main_window.btn_path.setMinimumWidth(110)
-        main_window.btn_path.clicked.connect(main_window.change_download_path)
-        pv.addWidget(main_window.btn_path, alignment=Qt.AlignRight)
+
+        mw.btn_path = QPushButton(t["btn_change_path"])
+        mw.btn_path.setMinimumWidth(110)
+        mw.btn_path.clicked.connect(mw.change_download_path)
+        pv.addWidget(mw.btn_path, alignment=Qt.AlignRight)
+
         ctrl.addLayout(pv)
-        content_layout.addLayout(ctrl)
 
-        # start
-        main_window.download_btn = QPushButton(t["btn_start"])
-        main_window.download_btn.setMinimumWidth(260)
-        main_window.download_btn.setMaximumWidth(340)
-        main_window.download_btn.clicked.connect(main_window.toggle_download)
-        content_layout.addWidget(main_window.download_btn, alignment=Qt.AlignHCenter)
+        self._content_layout.addLayout(ctrl)
 
-        # log
-        main_window.lbl_log = QLabel(t["label_log"])
-        content_layout.addWidget(main_window.lbl_log)
-        main_window.log_text = QPlainTextEdit()
-        main_window.log_text.setReadOnly(True)
-        content_layout.addWidget(main_window.log_text)
+    # ================================================================
+    # Download Button
+    # ================================================================
 
-        for src, rb in {
-            "none": main_window.rb_guest,
-            "chrome": main_window.rb_chrome,
-            "edge": main_window.rb_edge,
-            "firefox": main_window.rb_firefox,
-            "safari": main_window.rb_safari,
-            "file": main_window.rb_file,
-        }.items():
-            rb.toggled.connect(lambda checked, s=src: checked and main_window._set_cookie_source(s))
+    def _setup_download_button(self, mw, t):
+        mw.download_btn = QPushButton(t["btn_start"])
+        mw.download_btn.setMinimumWidth(260)
+        mw.download_btn.setMaximumWidth(340)
+        mw.download_btn.clicked.connect(mw.toggle_download)
+        self._content_layout.addWidget(
+            mw.download_btn, alignment=Qt.AlignHCenter
+        )
 
-        # file picker enabled only in file mode (startup safety)
-        main_window.btn_sel_cookie.setEnabled(main_window.cookie_source == "file")
+    # ================================================================
+    # Log Area
+    # ================================================================
+
+    def _setup_log_section(self, mw, t):
+        mw.lbl_log = QLabel(t["label_log"])
+        self._content_layout.addWidget(mw.lbl_log)
+
+        mw.log_text = QPlainTextEdit()
+        mw.log_text.setReadOnly(True)
+        mw.log_text.setMaximumBlockCount(mw.LOG_MAX_LINES)
+        self._content_layout.addWidget(mw.log_text)
+
+    # ================================================================
+    # Cookie Radio Signal Connections
+    # ================================================================
+
+    def _connect_cookie_signals(self, mw):
+        source_map = {
+            "none": mw.rb_guest,
+            "chrome": mw.rb_chrome,
+            "edge": mw.rb_edge,
+            "firefox": mw.rb_firefox,
+            "safari": mw.rb_safari,
+            "file": mw.rb_file,
+        }
+        for src, rb in source_map.items():
+            rb.toggled.connect(
+                lambda checked, s=src: checked and mw._set_cookie_source(s)
+            )

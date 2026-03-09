@@ -58,8 +58,11 @@ class ThemeManager:
             # Explicitly force the top-level container to be transparent via CSS
             # Using QWidget#MainWindow targets our main window without affecting children.
             self.mw.setStyleSheet("QWidget#MainWindow { background: transparent; border: none; }")
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                self.mw.log_thread_safe(f"Theme apply warning: {e}", "warning")
+            except Exception:
+                pass
 
         if hasattr(self.mw, "title_bar"):
             self.mw.title_bar.update_title_color()

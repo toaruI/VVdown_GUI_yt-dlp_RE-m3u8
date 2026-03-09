@@ -19,8 +19,8 @@ class UIStateManager:
         try:
             self.mw.downloader.set_language(self.mw.lang)
             self.mw.installer.set_language(self.mw.lang)
-        except Exception:
-            pass
+        except Exception as e:
+            self.mw.log_thread_safe(f"Language sync warning: {e}", "warning")
 
         self.refresh_text()
 
@@ -79,7 +79,7 @@ class UIStateManager:
 
         self.mw.lbl_save_path.setText(t["label_save_path"])
         self.mw.btn_path.setText(t["btn_change_path"])
-        self.mw.path_label.setText(self.mw.download_dir[-30:])
+        self.mw.path_label.setText(self.mw._truncate_path(self.mw.download_dir))
 
         self.mw.lbl_log.setText(t["label_log"])
 
