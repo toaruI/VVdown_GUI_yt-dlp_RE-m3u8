@@ -1,4 +1,4 @@
-# core/cookie_utils.py
+# utils/cookie_utils.py
 import json
 import os
 import threading
@@ -62,13 +62,38 @@ def _make_cache_key(filepath: str, host: str, mtime: float, max_len: int) -> str
     return f"{filepath}|{host}|{mtime}|{max_len}"
 
 
+def _domain_matches(cookie_domain: str, target_host: str) -> bool:
+    """
+    RFC 6265 域名匹配：
+    - .bilibili.com 匹配 www.bilibili.com ✅
+    - .bilibili.com 匹配 bilibili.com ✅
+    - .com 不匹配 bilibili.com ❌（顶级域名保护）
+    - evil.com 不匹配 notevil.com ❌
+    """
+    cookie_domain = cookie_domain.strip('.').lower()
+    target_host = target_host.lower()
+
+    # perfect match
+    if cookie_domain == target_host:
+        return True
+
+    # postfix match (cookie domain is a suffix of target host, with a dot boundary)
+    if target_host.endswith('.' + cookie_domain):
+        # prevent matching top-level domains like ".com"
+        if '.' not in cookie_domain:
+            return False
+        return True
+
+    return False
+
+
 @lru_cache(maxsize=COOKIE_CACHE_MAX_ENTRIES)
 def _read_cookie_cached(filepath: str, host: str, mtime: float, max_len: int) -> str:
     """
     Cached cookie reader keyed by (filepath, host, mtime, max_len).
     Auto-invalidates when file mtime changes.
     """
-    cookie_parts = []
+    cookies = {}
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
@@ -80,9 +105,10 @@ def _read_cookie_cached(filepath: str, host: str, mtime: float, max_len: int) ->
                     domain_field = fields[0]
                     name = fields[5]
                     value = fields[6]
-                    if domain_field and (domain_field.strip('.') in host or host in domain_field):
-                        cookie_parts.append(f"{name}={value}")
-        final_cookie = "; ".join(cookie_parts)
+
+                    if domain_field and _domain_matches(domain_field, host):
+                        cookies[name] = value
+        final_cookie = "; ".join(f"{k}={v}" for k, v in cookies.items())
         if len(final_cookie) > max_len:
             return final_cookie[:max_len]
         return final_cookie
@@ -142,7 +168,7 @@ def parse_cookie_file(filepath: str, target_url: str, max_len: int = 6000):
         pass
 
     # Non-cached path (original behavior)
-    cookie_parts = []
+    cookies = {}
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
@@ -154,11 +180,13 @@ def parse_cookie_file(filepath: str, target_url: str, max_len: int = 6000):
                     domain_field = fields[0]
                     name = fields[5]
                     value = fields[6]
-                    if domain_field and (domain_field.strip('.') in host or host in domain_field):
-                        cookie_parts.append(f"{name}={value}")
-        final_cookie = "; ".join(cookie_parts)
+                    if domain_field and _domain_matches(domain_field, host):
+                        cookies[name] = value
+
+        final_cookie = "; ".join(f"{k}={v}" for k, v in cookies.items())
         if len(final_cookie) > max_len:
             final_cookie = final_cookie[:max_len]
+
         # Save to persistent cache
         if COOKIE_PERSISTENT_CACHE_ENABLED:
             try:
@@ -170,10 +198,30 @@ def parse_cookie_file(filepath: str, target_url: str, max_len: int = 6000):
                     _save_persistent_cache(cache)
             except Exception:
                 pass
+
         return final_cookie
 
     except Exception:
         # 读取或解析出错，返回空字符串以便调用方选择降级行为
+        return ""
+
+def parse_cookie_file_all(filepath: str, max_len: int = 6000) -> str:
+    """read all cookies from a Netscape format cookie file, ignoring domain matching."""
+    if not os.path.exists(filepath):
+        return ""
+    cookies = {}
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                fields = line.split('\t')
+                if len(fields) >= 7:
+                    cookies[fields[5]] = fields[6]
+        result = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        return result[:max_len] if len(result) > max_len else result
+    except Exception:
         return ""
 
 

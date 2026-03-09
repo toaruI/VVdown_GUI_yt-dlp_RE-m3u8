@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QWidget, QApplication
 from config.config import TRANSLATIONS, SYSTEM, load_user_config, save_user_config
 from core.downloader import DownloaderEngine
 from core.installer import DependencyInstaller
-from utils import setup_env_path
+from utils import setup_env_path, open_download_folder
 from .cookie_manager import CookieManager
 from .dependency_handler import DependencyHandler
 from .download_handler import DownloadHandler
@@ -33,7 +33,18 @@ class MainWindow(QWidget):
     RESIZE_BORDER = 6
     NORMAL_MARGINS = (6, 6, 6, 6)  # >= RESIZE_BORDER
     MAXIMIZED_MARGINS = (0, 0, 0, 0)
-    LOG_PREFIX = {"error": "❌ ", "success": "✅ ", "warning": "⚠️ "}
+
+    DEFAULT_WINDOW_SIZE = (740, 780)
+    DEFAULT_WINDOW_SIZE_MAC = (740, 820)
+    MIN_WINDOW_SIZE = (720, 600)
+    LOG_MAX_LINES = 1000
+    PATH_DISPLAY_MAX_LEN = 30
+
+    LOG_PREFIX = {
+        "error": "❌ ",
+        "success": "✅ ",
+        "warning": "⚠️ ",
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,6 +59,10 @@ class MainWindow(QWidget):
         self._apply_initial_state()
         self._connect_signals()
 
+    # ================================================================
+    # Initialization
+    # ================================================================
+
     def _setup_window(self):
         self.setObjectName("MainWindow")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -57,8 +72,8 @@ class MainWindow(QWidget):
         self.setMouseTracking(True)
         try:
             QApplication.setStyle("Fusion")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[init] Failed to set Fusion style: {e}")
 
     def _load_config(self):
         self.system = SYSTEM
@@ -132,6 +147,7 @@ class MainWindow(QWidget):
         )
 
     # ---------------- helpers ----------------
+
     def get_current_trans(self):
         return TRANSLATIONS.get(self.lang, TRANSLATIONS["en"])
 
@@ -151,11 +167,17 @@ class MainWindow(QWidget):
         # Fallback: if the controller has a _proc attribute, we assume it's running
         return getattr(ctrl, "_proc", None) is not None
 
+    @staticmethod
+    def _truncate_path(path: str, max_len: int = 30) -> str:
+        """cuts the middle part of a path and adds an ellipsis if it exceeds max_len"""
+        if len(path) <= max_len:
+            return path
+        return "…" + path[-(max_len - 1):]
+
     @Slot(str, str)
     def _append_log(self, text, tag):
-        prefix = {"error": "❌ ", "success": "✅ ", "warning": "⚠️ "}.get(tag, "")
+        prefix = self.LOG_PREFIX.get(tag, "")
         self.log_text.appendPlainText(prefix + text)
-        self.log_text.setMaximumBlockCount(1000)
 
     # ---------------- UI ----------------
     def _build_ui(self):
@@ -201,6 +223,15 @@ class MainWindow(QWidget):
             self.path_label.setText(d[-30:])
             self.update_config("download_dir", d)
 
+    def _open_download_folder(self):
+        success, err = open_download_folder(self.download_dir)
+        if not success:
+            t = self.get_current_trans()
+            self.log_thread_safe(
+                t.get("log_open_dir_error", "Failed to open folder: {e}").format(e=err),
+                "warning"
+            )
+
     def open_cookie_plugin(self):
         self.cookie_manager.open_cookie_plugin()
 
@@ -210,9 +241,13 @@ class MainWindow(QWidget):
     def change_theme(self):
         self.theme_manager.change_theme()
 
+    # ================================================================
+    # Window events
+    # ================================================================
+
     def showEvent(self, event):
         super().showEvent(event)
-        if not getattr(self, "_hover_fix_applied", False):
+        if not self._hover_fix_applied:
             self._hover_fix_applied = True
             self.ui_state_manager.apply_mac_hover_fix()
 

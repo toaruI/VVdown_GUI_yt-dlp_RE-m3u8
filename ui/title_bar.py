@@ -157,14 +157,27 @@ class TitleBar(QWidget):
 
     def update_title_color(self):
         theme = getattr(self._parent, "theme", "dark")
-        if theme == "dark":
-            self.title_label.setStyleSheet(
-                "QLabel#TitleLabel { color: rgba(255,255,255,0.85); font-weight: 600; font-size: 13px; background: transparent; border: none; }"
-            )
+        if theme == "auto":
+            try:
+                import qdarktheme
+                from PySide6.QtGui import QPalette
+                palette = qdarktheme.load_palette("auto")
+                bg = palette.color(QPalette.Window)
+                is_dark = bg.lightness() < 128
+            except Exception:
+                is_dark = True
         else:
-            self.title_label.setStyleSheet(
-                "QLabel#TitleLabel { color: rgba(0,0,0,0.75); font-weight: 600; font-size: 13px; background: transparent; border: none; }"
-            )
+            is_dark = (theme == "dark")
+
+        if is_dark:
+            color = "rgba(255,255,255,0.85)"
+        else:
+            color = "rgba(0,0,0,0.75)"
+
+        self.title_label.setStyleSheet(
+            f"QLabel#TitleLabel {{ color: {color}; font-weight: 600; "
+            f"font-size: 13px; background: transparent; border: none; }}"
+        )
 
     def update_maximize_icon(self, is_maximized: bool):
         if self.is_mac:

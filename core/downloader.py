@@ -113,17 +113,44 @@ class DownloaderEngine:
 
     def _bootstrap_cookies_from_browser(self, browser: str, target_url: str) -> Optional[str]:
         """Extract browser cookies into a cookies.txt file using yt-dlp (first-run bootstrap)."""
+        import time
+
         try:
             from config.config import USER_CONFIG_DIR
             base = Path(USER_CONFIG_DIR)
             base.mkdir(parents=True, exist_ok=True)
             out_file = base / f"cookies_{browser}.txt"
 
+            #print(f"[DEBUG bootstrap] out_file={out_file}")
+            #print(f"[DEBUG bootstrap] exists={out_file.exists()}")
+
+            FRESH_SECONDS = 3600  # 约 60 分钟内的缓存都认为是新鲜的，避免频繁调用 yt-dlp 导出
+            if out_file.exists() and (time.time() - out_file.stat().st_mtime) < FRESH_SECONDS:
+                age = time.time() - out_file.stat().st_mtime
+                if age < FRESH_SECONDS:
+                    with open(out_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        first_line = f.readline().strip()
+                    if first_line.startswith('# Netscape') or '\t' in first_line:
+                        _safe_log(self.log,
+                                  self._t('log_bootstrap_cookie_reuse',
+                                          '>>> 🍪 Reusing cached cookies from {browser} ({age}s ago)\n',
+                                          browser=browser, age=int(age)),
+                                  "info")
+                        return str(out_file)
+                    else:
+                        out_file.unlink(missing_ok=True)
+
+            _safe_log(self.log,
+                self._t('log_bootstrap_cookie_start',
+                    '>>> 🍪 Extracting cookies from {browser}, please wait...\n',
+                    browser = browser),
+                "info")
+
             cmd = [
                 "yt-dlp",
                 "--cookies-from-browser", browser,
+                "--cookies", str(out_file),
                 "--skip-download",
-                "--print-to-file", "cookies", str(out_file),
                 target_url,
             ]
 
@@ -135,8 +162,32 @@ class DownloaderEngine:
             )
 
             if out_file.exists() and out_file.stat().st_size > 0:
-                _safe_log(self.log, f">>> 🍪 Extracted cookies from {browser} cache\n", "success")
-                return str(out_file)
+                with open(out_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    first_line = f.readline().strip()
+
+                if first_line.startswith('# Netscape') or '\t' in first_line:
+                    _safe_log(self.log,
+                              self._t('log_bootstrap_cookie_done',
+                                      '>>> 🍪 Extracted cookies from {browser} cache\n',
+                                      browser=browser),
+                              "success")
+                    return str(out_file)
+
+                else:
+                    _safe_log(self.log,
+                              self._t('log_bootstrap_cookie_fail',
+                                      '>>> ⚠️ Cookie file format invalid from {browser}\n',
+                                      browser=browser),
+                              "warning")
+                    out_file.unlink(missing_ok=True)
+            else:
+                _safe_log(self.log,
+                          self._t('log_bootstrap_cookie_fail',
+                                  '>>> ⚠️ No cookies extracted from {browser}.\n'
+                                  '    Tip: Try using the "Get cookies.txt" button to export manually.\n',
+                                  browser=browser),
+                          "warning")
+
         except Exception:
             pass
         return None
@@ -149,6 +200,165 @@ class DownloaderEngine:
                 cb(success, rc)
             except Exception:
                 pass
+
+    def _resolve_cookie(self, cookie_src: str, cookie_path: str, url: str, engine="native"):
+        """
+        统一解析 Cookie，返回 (cookie_str, cookie_file_path, browser_fallback)
+        - cookie_str: "k=v; k2=v2" 格式，用于 header 注入
+        - cookie_file_path: cookies.txt 文件路径，用于 --cookies 参数
+
+        返回 (None, None, None) 表示无可用 Cookie
+        """
+        # Guest mode do not use cookies
+        if cookie_src == "none":
+            return None, None, None
+
+        if not cookie_path:
+            if cookie_src == "file":
+                _safe_log(self.log,
+                          self._t('log_cookie_no_file',
+                                  'No cookie file selected.\n'),
+                          "warning")
+                return None, None, None
+            if cookie_src in ("chrome", "edge", "firefox", "safari"):
+                return None, None, cookie_src
+            return None, None, None
+
+        #print(f"[DEBUG _resolve_cookie] cookie_src={cookie_src}, cookie_path={cookie_path}")
+        #print(f"[DEBUG _resolve_cookie] COOKIE_PERSISTENT_CACHE_ENABLED={COOKIE_PERSISTENT_CACHE_ENABLED}")
+
+        # try persistent cache first (only if cookie_path is provided.
+        # otherwise skip to avoid unnecessary file access)
+
+        is_manual = (cookie_src == "file")
+
+        if is_manual:
+            _safe_log(self.log,
+                      self._t('log_cookie_filter',
+                              '>>> Filtering cookies for target host...\n'),
+                      "info")
+
+        try:
+            if engine == "re":
+                from utils import parse_cookie_file_all
+                cookie_str = parse_cookie_file_all(cookie_path)
+            else:
+                cookie_str = parse_cookie_file(cookie_path, url)
+        except Exception as e:
+            _safe_log(self.log,
+                      self._t('log_cookie_parse_error',
+                              '>>> ⚠️ Failed to parse cookie file: {e}\n', e=e),
+                      "warning")
+            cookie_str = None
+
+        if cookie_str:
+            if is_manual:
+                _safe_log(self.log,
+                        self._t('log_cookie_loaded_file',
+                                '>>> Loaded {count} cookies from file\n', count=len(cookie_str)),
+                        "success")
+            else:
+                _safe_log(self.log,
+                          self._t('log_cookie_match',
+                                  '>>> Loaded {count} cookies from cache\n',
+                                  count=len(cookie_str)),
+                          "success")
+                return cookie_str, cookie_path, None
+
+        if is_manual:
+            _safe_log(self.log,
+                      self._t('log_cookie_none',
+                              'No matching cookies found. File may be wrong.\n'),
+                      "warning")
+
+        if os.path.isfile(cookie_path):
+            _safe_log(self.log,
+                      self._t('log_cookie_file_fallback',
+                              '>>> Passing cookie file directly to downloader\n'),
+                      "info")
+            return None, cookie_path, None
+
+        # 浏览器 Cookie 回退
+        if cookie_src in ("chrome", "edge", "firefox", "safari"):
+            _safe_log(self.log,
+                      self._t('log_cookie_fallback_browser',
+                              '>>> Cookie cache miss, falling back to browser extraction (slow)\n'),
+                      "warning")
+            return None, None, cookie_src  # return browser fallback if cache miss
+
+        return None, None, None
+
+    def _inject_cookie_to_cmd(self, cmd: list, engine: str,
+                              cookie_str: str | None,
+                              cookie_file_path: str | None,
+                              browser_fallback: str | None,
+                              url: str,
+                              bootstrap_attempted=False):
+        """
+        根据引擎类型，将 Cookie 注入到命令中
+        """
+        if cookie_str:
+            if engine == "re":
+                header = f"Cookie: {cookie_str}"
+                cmd.extend(["--header", header])
+            else:
+                if cookie_file_path and os.path.isfile(cookie_file_path):
+                    cmd.extend(["--cookies", cookie_file_path])
+                else:
+                    # fallback to header injection if cookie file is not available (e.g. from browser bootstrap)
+                    cmd.extend(["--add-header", f"Cookie: {cookie_str}"])
+            return
+
+        # no cookie_str available, but cookie_file_path exists (e.g. from browser bootstrap), use it if supported
+        if cookie_file_path and os.path.isfile(cookie_file_path):
+            if engine == "re":
+                # RE 不支持 --cookies，需要读取文件手动注入 header
+                try:
+                    from utils import parse_cookie_file_all
+                    cookie_str = parse_cookie_file_all(cookie_file_path)
+                    if cookie_str:
+                        cmd.extend(["--header", f"Cookie: {cookie_str}"])
+                except Exception:
+                    pass
+            else:
+                cmd.extend(["--cookies", cookie_file_path])
+            return
+
+        # no cookie_str or cookie_file_path, but browser fallback is available
+        if browser_fallback:
+            _safe_log(self.log,
+                      self._t('log_cookie_from_browser',
+                              '>>> Using browser cookies: {browser}\n',
+                              browser=browser_fallback),
+                      "info")
+            if engine != "re":
+                cmd.extend(["--cookies-from-browser", browser_fallback])
+            else:
+                if bootstrap_attempted:
+                    _safe_log(self.log,
+                              self._t('log_re_no_browser',
+                                      'Cookie extraction failed. '
+                                      'Try exporting cookies.txt manually.\n'),
+                              "warning")
+                # RE doesn't support --cookies-from-browser, need to bootstrap and inject as header
+                else:
+                    bootstrapped_path = self._bootstrap_cookies_from_browser(browser_fallback, url)
+                    if bootstrapped_path and os.path.isfile(bootstrapped_path):
+                        try:
+                            from utils import parse_cookie_file_all
+                            cookie_str = parse_cookie_file_all(bootstrapped_path)
+                            if cookie_str:
+                                cmd.extend(["--header", f"Cookie: {cookie_str}"])
+                                return
+                        except Exception:
+                            pass
+
+                    _safe_log(self.log,
+                              self._t('log_re_no_browser',
+                                      'Failed to extract cookies for RE engine. '
+                                      'Try exporting cookies.txt manually.\n'),
+                              "warning")
+
 
     # -------- i18n helpers (UI-facing logs only) --------
     def set_language(self, lang: str):
@@ -171,9 +381,10 @@ class DownloaderEngine:
 
     def _check_common_tools(self, engine: str):
         """
-        检查常用外部命令是否可用，并在日志中给出提示（但不强制失败）。
+        check for presence of required tools based on selected engine,
+        and log warnings if not found. Does not raise exceptions, just logs.
         """
-        # 检查 yt-dlp
+        # check yt-dlp
         if engine in ("native", "aria2"):
             if not is_cmd_available("yt-dlp"):
                 _safe_log(self.log, self._t('log_check_yt_fail',
@@ -193,141 +404,102 @@ class DownloaderEngine:
     def _build_command(self, url: str, engine: str, save_dir: str,
                        cookie_src: str, cookie_path: str, threads: int) -> Tuple[list, Optional[str]]:
         """
-        构建要执行的命令列表，并返回 (cmd_list, maybe_cookie_header_str)
-        如果需要向 RE 注入 header，则 cookie_header_str 为 "Cookie: k=v; k2=v2" 格式，否则为 None。
+        build the command list based on engine and cookie strategy, and return (cmd_list, cookie_header_str)
+            - cmd_list: the list of command arguments to execute
+            - cookie_header_str: the actual "Cookie: k=v; ..." string injected into headers (for logging display), or None if no cookies used
         """
-        cmd = []
-        cookie_header = None
+
+        #print(f"[DEBUG _build_command] INITIAL cookie_path='{cookie_path}' (type={type(cookie_path)})")
+        #print(f"[DEBUG _build_command] not cookie_path = {not cookie_path}")
+        #print(
+        #    f"[DEBUG _build_command] cookie_src in browsers = {cookie_src in ('chrome', 'edge', 'firefox', 'safari')}")
+
+        bootstrap_attempted = False
+
+        if not cookie_path and cookie_src in ("chrome", "edge", "firefox", "safari"):
+            #print(f"[DEBUG _build_command] ENTERING bootstrap...")
+            bootstrap_browser = cookie_src
+            cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
+            bootstrap_attempted = True
+            #print(f"[DEBUG _build_command] bootstrap returned: '{cookie_path}'")
+        #else:
+        #    print(f"[DEBUG _build_command] SKIPPED bootstrap")
+
+        #print(f"[DEBUG _build_command] after bootstrap: cookie_path={cookie_path}")
+        #print(f"[DEBUG _build_command] cookie_src={cookie_src}, engine={engine}")
+
+        cookie_str, cookie_file, browser_fallback = \
+            self._resolve_cookie(cookie_src, cookie_path, url, engine=engine)
+
+        if engine == "re":
+            cmd, cookie_header = self._build_re_command(url, save_dir, threads)
+        elif engine == "aria2":
+            cmd, cookie_header = self._build_ytdlp_command(url, save_dir, aria2=True, threads=threads)
+        else:
+            cmd, cookie_header = self._build_ytdlp_command(url, save_dir, aria2=False, threads=threads)
+
+        self._inject_cookie_to_cmd(cmd, engine, cookie_str, cookie_file, browser_fallback, url, bootstrap_attempted=bootstrap_attempted)
+
+        if cookie_str and engine == "re":
+            cookie_header = f"Cookie: {cookie_str}"
+
+        return cmd, cookie_header
+
+    def _build_re_command(self, url: str, save_dir: str, threads: int):
+        """build the command list for N_m3u8DL-RE engine, and return (cmd_list, None) since RE doesn't support header injection"""
 
         def _is_stream_url(u: str) -> bool:
             ul = u.lower()
             return ul.endswith('.m3u8') or ul.endswith('.mpd') or 'm3u8' in ul
 
-        # First-run bootstrap: always try browser cookies if no cookie file exists
-        if not cookie_path:
-            # choose a reasonable browser source
-            bootstrap_browser = cookie_src if cookie_src in ["chrome", "edge", "firefox", "safari"] else None
-            if bootstrap_browser:
-                cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
+        if not _is_stream_url(url):
+            raise ValueError("RE engine only supports stream URLs (m3u8/mpd).")
 
-        if engine == "re":
-            # N_m3u8DL-RE
-            # RE only supports stream URLs
-            if not _is_stream_url(url):
-                raise ValueError("RE engine only supports stream URLs (m3u8/mpd). Use yt-dlp for webpage URLs.")
-            re_exe = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
-            re_path = os.path.join(BIN_DIR, re_exe)
-            exe_cmd = re_path if os.path.isfile(re_path) else "N_m3u8DL-RE"
+        re_exe = "N_m3u8DL-RE.exe" if self.system == "Windows" else "N_m3u8DL-RE"
+        re_path = os.path.join(BIN_DIR, re_exe)
+        exe_cmd = re_path if os.path.isfile(re_path) else "N_m3u8DL-RE"
 
-            cmd = [
-                exe_cmd,
-                url,
-                "--save-dir", save_dir,
-                "--auto-select",
-                "--no-log"  # 禁用 RE 自己的日志文件，直接读 stdout
-            ]
+        cmd = [
+            exe_cmd, url,
+            "--save-dir", save_dir,
+            "--auto-select",
+            "--no-log",
+        ]
 
-            # Only override thread count if user explicitly set it
-            if threads > 0:
-                cmd.extend(["--thread-count", str(threads)])
+        if threads > 0:
+            cmd.extend(["--thread-count", str(threads)])
 
-            # Prefer cached cookies.txt (fast path), regardless of UI cookie mode
-            cookie_str = None
-            if COOKIE_PERSISTENT_CACHE_ENABLED and cookie_path:
-                try:
-                    cookie_str = parse_cookie_file(cookie_path, url)
-                except Exception:
-                    cookie_str = None
+        return cmd, None
 
-            # If cached/matched cookies exist, inject as header and skip browser cookies
-            if cookie_str:
-                cookie_header = f"Cookie: {cookie_str}"
-                cmd.extend(["--header", cookie_header])
-                _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Using cached cookies.txt\n"), "success")
-            else:
-                # Fallback to UI-selected cookie mode
-                if cookie_src == "file" and cookie_path:
-                    _safe_log(self.log,
-                              self._t('log_cookie_filter', ">>> Filtering cookies for target host: {host}...\n",
-                                      host=""), "info")
-                    try:
-                        cookie_str = parse_cookie_file(cookie_path, url)
-                    except Exception as e:
-                        _safe_log(self.log,
-                                  self._t('log_cookie_parse_error', ">>> ⚠️ Failed to parse cookie file: {e}\n", e=e),
-                                  "warning")
-                    if cookie_str:
-                        cookie_header = f"Cookie: {cookie_str}"
-                        cmd.extend(["--header", cookie_header])
-                        _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Loaded cookies from file\n"), "success")
-                    else:
-                        _safe_log(self.log, self._t('log_cookie_none',
-                                                    "⚠️ No cookies found for {host}. Falling back to direct download.",
-                                                    host=""), "warning")
-                elif cookie_src in ["chrome", "edge", "safari", "firefox"]:
-                    _safe_log(self.log,
-                              self._t('log_re_no_browser', "⚠️ RE engine does not support direct browser link."),
-                              "warning")
+    def _build_ytdlp_command(self, url: str, save_dir: str,
+                             aria2: bool = False, threads: int = 0):
+        """build the command list for yt-dlp engine, and return (cmd_list, None) since cookies are injected via --add-header or --cookies-from-browser"""
+        yt_path = os.path.join(BIN_DIR, "yt-dlp.exe" if IS_WIN else "yt-dlp")
+        yt_cmd = yt_path if os.path.isfile(yt_path) else "yt-dlp"
 
-        else:
-            # yt-dlp 路径
-            yt_path = os.path.join(BIN_DIR, "yt-dlp.exe" if IS_WIN else "yt-dlp")
-            yt_cmd = yt_path if os.path.isfile(yt_path) else "yt-dlp"
+        cmd = [
+            yt_cmd,
+            "-P", save_dir,
+            "--merge-output-format", "mp4",
+            "--retries", "10",
+            "-f", "bv+ba/b",
+            url,
+        ]
 
-            cmd = [
-                yt_cmd,
-                "-P", save_dir,
-                "--merge-output-format", "mp4",
-                "--retries", "10",
-                "-f", "bv+ba/b",
-                url
-            ]
+        if aria2:
+            aria2_path = os.path.join(BIN_DIR, "aria2c.exe" if IS_WIN else "aria2c")
+            aria2_cmd = aria2_path if os.path.isfile(aria2_path) else "aria2c"
+            cmd.extend([
+                "--downloader", aria2_cmd,
+                "--downloader-args", f"{aria2_cmd}:-x {threads} -k 1M",
+            ])
+            _safe_log(self.log,
+                      self._t('log_aria2_enabled',
+                              '>>> Aria2 acceleration enabled (threads: {threads})\n',
+                              threads=threads),
+                      "info")
 
-            if engine == "aria2":
-                aria2_path = os.path.join(BIN_DIR, "aria2c.exe" if IS_WIN else "aria2c")
-                aria2_cmd = aria2_path if os.path.isfile(aria2_path) else "aria2c"
-
-                cmd.extend([
-                    "--downloader", aria2_cmd,
-                    "--downloader-args", f"{aria2_cmd}:-x {threads} -k 1M"
-                ])
-                _safe_log(self.log,
-                          self._t('log_aria2_enabled', ">>> Aria2 acceleration enabled (threads: {threads})\n",
-                                  threads=threads), "info")
-
-            # yt-dlp extractor-aware cookie strategy
-            if _is_twitter_url(url):
-                # Twitter / X: always prefer browser cookies (officially supported)
-                if cookie_src in ["chrome", "edge", "firefox", "safari"]:
-                    _safe_log(self.log,
-                              self._t('log_cookie_from_browser', ">>> Using browser cookies for Twitter/X: {browser}\n",
-                                      browser=cookie_src), "info")
-                    cmd.extend(["--cookies-from-browser", cookie_src])
-                else:
-                    _safe_log(self.log, self._t('log_cookie_none',
-                                                "⚠️ Twitter/X requires browser cookies for authenticated access."),
-                              "warning")
-            else:
-                # Non-Twitter sites: prefer cookies.txt (fast path)
-                cookie_str = None
-                if cookie_path:
-                    try:
-                        cookie_str = parse_cookie_file(cookie_path, url)
-                    except Exception:
-                        cookie_str = None
-
-                if cookie_str:
-                    _safe_log(self.log, self._t('log_cookie_match', ">>> ✅ Using cookies.txt (auto)\n"), "success")
-                    cmd.extend(["--add-header", f"Cookie: {cookie_str}"])
-                else:
-                    # Fallback to browser cookies
-                    if cookie_src in ["chrome", "edge", "firefox", "safari"]:
-                        _safe_log(self.log,
-                                  self._t('log_cookie_from_browser', ">>> Loading cookies from browser: {browser}\n",
-                                          browser=cookie_src), "info")
-                        cmd.extend(["--cookies-from-browser", cookie_src])
-
-        return cmd, cookie_header
+        return cmd, None
 
     def run(self, url: str, options: dict, controller: Optional['DownloadController'] = None) -> Tuple[
         bool, Optional[int]]:

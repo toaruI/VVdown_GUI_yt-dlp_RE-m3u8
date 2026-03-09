@@ -1,10 +1,10 @@
 import ctypes
-import platform
 import sys
 
 from PySide6.QtWidgets import QApplication
 
 from ui.app_window import MainWindow
+from config.config import IS_WIN
 
 
 def _enable_windows_dpi_awareness():
@@ -20,7 +20,7 @@ def _enable_windows_dpi_awareness():
 
 def main():
     # Enable high-DPI support on Windows
-    if platform.system() == "Windows":
+    if IS_WIN:
         _enable_windows_dpi_awareness()
 
     # Create Qt application

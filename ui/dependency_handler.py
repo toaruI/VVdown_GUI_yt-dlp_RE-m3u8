@@ -66,7 +66,7 @@ class DependencyHandler:
                 else:
                     self.mw._aria2_available = True
 
-            except Exception:
-                pass
+            except Exception as e:
+                self.mw.log_thread_safe(f"Dependency check failed: {e}", "warning")
 
         self.mw.threadpool.start(task)

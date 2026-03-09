@@ -19,8 +19,8 @@ class UIStateManager:
         try:
             self.mw.downloader.set_language(self.mw.lang)
             self.mw.installer.set_language(self.mw.lang)
-        except Exception:
-            pass
+        except Exception as e:
+            self.mw.log_thread_safe(f"Language sync warning: {e}", "warning")
 
         self.refresh_text()
 
@@ -79,7 +79,7 @@ class UIStateManager:
 
         self.mw.lbl_save_path.setText(t["label_save_path"])
         self.mw.btn_path.setText(t["btn_change_path"])
-        self.mw.path_label.setText(self.mw.download_dir[-30:])
+        self.mw.path_label.setText(self.mw._truncate_path(self.mw.download_dir))
 
         self.mw.lbl_log.setText(t["label_log"])
 
@@ -118,15 +118,21 @@ class UIStateManager:
 
     def toggle_engine_ui(self):
         is_re = self.mw.engine_combo.currentIndex() == (self.mw.engine_combo.count() - 1)
+        t = self.mw.get_current_trans()
 
         self.mw.thread_spin.setEnabled(True)
 
         for rb in [self.mw.rb_chrome, self.mw.rb_edge, self.mw.rb_firefox, self.mw.rb_safari]:
             if rb.isVisible():
-                rb.setEnabled(not is_re)
+                rb.setEnabled(True)
 
-        if is_re and self.mw.cookie_source in {"chrome", "edge", "firefox", "safari"}:
-            self.mw.rb_guest.setChecked(True)
+        if is_re:
+            self.mw.log_thread_safe(
+                t.get("log_re_cookie_tip",
+                      ">>> ℹ️ RE engine: browser cookies will be auto-extracted. "
+                      "If 403 occurs, try exporting cookies.txt manually.\n"),
+                "info"
+            )
 
     def apply_mac_hover_fix(self):
         self._enable_mouse_tracking(self.mw)
