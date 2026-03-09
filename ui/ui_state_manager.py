@@ -105,7 +105,7 @@ class UIStateManager:
 
         self.toggle_engine_ui()
 
-        if self.mw.download_controller and self.mw.download_controller._proc:
+        if self.mw.is_downloading():
             self.mw.download_btn.setText(t["btn_stop"])
         else:
             self.mw.download_btn.setText(t["btn_start"])

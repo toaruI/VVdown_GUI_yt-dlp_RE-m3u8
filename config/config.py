@@ -45,6 +45,7 @@ CONFIG_DIR = get_config_path()
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 TRANSLATION_FILE = os.path.join(CONFIG_DIR, "translations.json")
 USER_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".univ_downloader_config.json")
+USER_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".vdown")
 
 # =========================================
 # Cookie parsing cache (Performance)
@@ -84,7 +85,6 @@ MACHINE = platform.machine().lower()
 
 IS_ARM = MACHINE in ("arm64", "aarch64")
 IS_X64 = MACHINE in ("x86_64", "amd64")
-SUPPORTED_SYSTEMS = {"Darwin", "Windows", "Linux"}
 
 # =========================================
 # 2. 翻译数据管理 (Translations)

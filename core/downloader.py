@@ -62,6 +62,10 @@ class DownloadController:
         with self._lock:
             self._thread = thread
 
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._proc is not None
+
     def stop(self):
         with self._lock:
             proc = self._proc
@@ -81,7 +85,7 @@ class DownloadController:
                 except Exception:
                     proc.kill()
         except Exception:
-            # 忽略任何停止时的异常
+            # ignore any errors during termination (e.g. process already exited)
             pass
 
 
@@ -96,7 +100,6 @@ class DownloaderEngine:
         self.translations = translations or {}
         self.lang = lang
         self.on_done = on_done
-        self.process: Optional[subprocess.Popen] = None
         self.system = SYSTEM
 
         # Windows: hide console window (keep legacy behavior)
@@ -203,8 +206,9 @@ class DownloaderEngine:
         # First-run bootstrap: always try browser cookies if no cookie file exists
         if not cookie_path:
             # choose a reasonable browser source
-            bootstrap_browser = cookie_src if cookie_src in ["chrome", "edge", "firefox", "safari"] else "chrome"
-            cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
+            bootstrap_browser = cookie_src if cookie_src in ["chrome", "edge", "firefox", "safari"] else None
+            if bootstrap_browser:
+                cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
 
         if engine == "re":
             # N_m3u8DL-RE
@@ -328,14 +332,16 @@ class DownloaderEngine:
     def run(self, url: str, options: dict, controller: Optional['DownloadController'] = None) -> Tuple[
         bool, Optional[int]]:
         """
-        同步运行下载（阻塞）。保持与旧版接口一致：返回 True/False。
-        options: 包含 engine, threads, cookie_source, cookie_path, download_dir
+        执行下载命令并实时处理输出。返回 (success, return_code)。
+            - success: True if download succeeded (exit code 0 and no error keywords detected), False otherwise
+            - return_code: the actual exit code of the process, or None if process failed to start
+            - controller: optional DownloadController instance to receive process reference for control (e.g. stop)
         """
         engine = options.get("engine", "native")
         save_dir = options.get("download_dir", ".")
         cookie_src = options.get("cookie_source", "none")
         cookie_path = options.get("cookie_path", "")
-        # 保证 threads 为 int
+        # ensure threads is a non-negative integer, default to 0 (no extra threads) if invalid
         try:
             threads = int(options.get("threads", 0))
         except Exception:
@@ -357,9 +363,10 @@ class DownloaderEngine:
 
         error_detected = False
         return_code = None
+        proc = None
         try:
             # 创建子进程
-            self.process = subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -372,11 +379,11 @@ class DownloaderEngine:
                 creationflags=subprocess.CREATE_NO_WINDOW if self.system == "Windows" else 0
             )
             if controller:
-                controller._set_proc(self.process)
+                controller._set_proc(proc)
 
             # 实时读取输出
-            assert self.process.stdout is not None
-            for raw_line in self.process.stdout:
+            assert proc.stdout is not None
+            for raw_line in proc.stdout:
                 line = raw_line.strip()
                 if not line:
                     continue
@@ -390,8 +397,8 @@ class DownloaderEngine:
                 else:
                     _safe_log(self.log, line + "\n", None)
 
-            self.process.wait()
-            return_code = self.process.returncode
+            proc.wait()
+            return_code = proc.returncode
 
             success = (return_code == 0 and not error_detected)
             if success:
@@ -408,7 +415,8 @@ class DownloaderEngine:
             _safe_log(self.log, self._t('log_exception_generic', '>>> ❌ Exception occurred: {e}\n', e=e), "error")
             return False, None
         finally:
-            self.process = None
+            if controller:
+                controller._set_proc(None)
 
     def run_threaded(self, url: str, options: dict) -> DownloadController:
         """

@@ -45,7 +45,7 @@ class DownloadHandler:
 
     def toggle_download(self):
         t = self.mw.get_current_trans()
-        if self.mw.download_controller and self.mw.download_controller._proc:
+        if self.mw.is_downloading():
             self.mw.log_thread_safe(t.get("log_download_stop", "\n>>> Download Stopped.\n"), "warning")
             controller = self.mw.download_controller
             self.reset_download_ui()
@@ -61,8 +61,11 @@ class DownloadHandler:
             self.mw.log_thread_safe(msg + "\n", "warning")
             return
 
-        engine_text = self.mw.engine_combo.currentText().lower()
-        is_re = ("re" in engine_text)
+        engine_index = self.mw.engine_combo.currentIndex()
+        engine_count = self.mw.engine_combo.count()
+
+        is_re = (engine_index == engine_count - 1)
+
         if is_re:
             ul = url.lower()
             if not (ul.endswith('.m3u8') or ul.endswith('.mpd') or 'm3u8' in ul):
@@ -76,10 +79,11 @@ class DownloadHandler:
         self.mw.log_text.clear()
         self.mw.download_btn.setText(t["btn_stop"])
 
-        engine = "native"
         if is_re:
             engine = "re"
-        elif "aria2" in engine_text:
+        elif engine_index == 0:
+            engine = "native"
+        else:
             engine = "aria2"
 
         opts = {

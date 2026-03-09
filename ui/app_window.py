@@ -132,6 +132,15 @@ class MainWindow(QWidget):
     def log_thread_safe(self, text, tag=None):
         self.log_signal.emit(text, tag or "info")
 
+    def is_downloading(self) -> bool:
+        ctrl = self.download_controller
+        if ctrl is None:
+            return False
+        if hasattr(ctrl, "is_running"):
+            return ctrl.is_running()
+        # Fallback: if the controller has a _proc attribute, we assume it's running
+        return getattr(ctrl, "_proc", None) is not None
+
     @Slot(str, str)
     def _append_log(self, text, tag):
         prefix = {"error": "❌ ", "success": "✅ ", "warning": "⚠️ "}.get(tag, "")
