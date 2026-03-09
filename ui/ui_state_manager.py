@@ -64,14 +64,7 @@ class UIStateManager:
         self.mw.engine_combo.blockSignals(True)
         current_index = self.mw.engine_combo.currentIndex()
 
-        aria2_available = True
-        try:
-            status = self.mw.installer.check_status()
-            aria2_available = bool(status.get("aria2"))
-        except Exception:
-            aria2_available = getattr(self.mw, "_aria2_available", True)
-
-        self.mw._aria2_available = aria2_available
+        aria2_available = getattr(self.mw, "_aria2_available", True)
 
         self.mw.engine_combo.clear()
         engines = [t["engine_native"]]
