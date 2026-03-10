@@ -4,7 +4,7 @@ import os
 import subprocess
 import shutil
 
-from config.config import IS_MAC, IS_WIN
+from config.config import IS_MAC, IS_WIN, BIN_DIR
 
 def setup_env_path():
     """
@@ -62,8 +62,16 @@ def is_cmd_available(cmd: str) -> bool:
     """
     if not cmd:
         return False
+    if IS_WIN:
+        bin_path = os.path.join(BIN_DIR, cmd if cmd.endswith('.exe') else cmd + '.exe')
+    else:
+        bin_path = os.path.join(BIN_DIR, cmd)
+    if os.path.isfile(bin_path):
+        return True
+    
     if shutil.which(cmd):
         return True
+    
     try:
         subprocess.run(
             [cmd, "--version"],
