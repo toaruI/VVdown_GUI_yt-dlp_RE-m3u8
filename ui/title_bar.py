@@ -1,9 +1,64 @@
 # -*- coding: utf-8 -*-
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QSizePolicy
 
 from config.config import IS_MAC
+
+
+class WinControlButton(QPushButton):
+    """self-drwn window control button for Windows (minimize, maximize, close)"""
+
+    def __init__(self, role: str, parent=None):
+        super().__init__(parent)
+        self._role = role  # "min" | "max" | "close"
+        self._is_maximized = False
+        self.setFixedSize(36, 26)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setObjectName("WinControlButton")
+
+    def set_maximized(self, maximized: bool):
+        self._is_maximized = maximized
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, False)
+
+        # follow text color for better theme adaptability
+        pen = QPen(self.palette().text().color())
+        pen.setWidthF(1.2)
+        p.setPen(pen)
+
+        cx, cy = self.width() / 2, self.height() / 2
+
+        if self._role == "min":
+            # ─
+            p.drawLine(int(cx - 5), int(cy), int(cx + 5), int(cy))
+
+        elif self._role == "max":
+            if not self._is_maximized:
+                # □
+                rect = QRectF(cx - 5, cy - 5, 10, 10)
+                p.drawRect(rect)
+            else:
+                # ❐
+                # behind box
+                p.drawRect(QRectF(cx - 3, cy - 6, 9, 9))
+                # front box
+                p.setBrush(self.palette().window())
+                p.drawRect(QRectF(cx - 6, cy - 3, 9, 9))
+
+        elif self._role == "close":
+            # ✕
+            pen.setWidthF(1.5)
+            p.setPen(pen)
+            d = 5
+            p.drawLine(int(cx - d), int(cy - d), int(cx + d), int(cy + d))
+            p.drawLine(int(cx + d), int(cy - d), int(cx - d), int(cy + d))
+
+        p.end()
 
 
 # --- Custom Frameless Title Bar (platform-aware) ---
@@ -69,14 +124,9 @@ class TitleBar(QWidget):
 
         # -------- Windows controls (right) --------
         if not self.is_mac:
-            self.btn_min = QPushButton("–", self)
-            self.btn_max = QPushButton("▢", self)
-            self.btn_close = QPushButton("✕", self)
-
-            for b in (self.btn_min, self.btn_max, self.btn_close):
-                b.setFixedSize(36, 26)
-                b.setFocusPolicy(Qt.NoFocus)
-                b.setObjectName("WinControlButton")
+            self.btn_min = WinControlButton("min", self)
+            self.btn_max = WinControlButton("max", self)
+            self.btn_close = WinControlButton("close", self)
 
             self.btn_min.clicked.connect(self._parent.showMinimized)
             self.btn_max.clicked.connect(self._parent.ui_state_manager.toggle_maximize)
@@ -143,7 +193,7 @@ class TitleBar(QWidget):
                 color: palette(text);
                 border: none;
                 border-radius: 4px;
-                font-size: 14px;
+                font-size: 18px;
             }
             QPushButton#WinControlButton:hover {
                 background-color: palette(midlight);
@@ -184,8 +234,7 @@ class TitleBar(QWidget):
             symbol = "↙" if is_maximized else "↗"
             self.btn_max.setText(symbol)
         else:
-            symbol = "🗗" if is_maximized else "▢"
-            self.btn_max.setText(symbol)
+            self.btn_max.set_maximized(is_maximized)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:

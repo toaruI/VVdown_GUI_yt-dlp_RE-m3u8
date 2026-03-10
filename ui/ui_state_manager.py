@@ -126,13 +126,33 @@ class UIStateManager:
             if rb.isVisible():
                 rb.setEnabled(True)
 
-        if is_re:
-            self.mw.log_thread_safe(
-                t.get("log_re_cookie_tip",
-                      ">>> ℹ️ RE engine: browser cookies will be auto-extracted. "
-                      "If 403 occurs, try exporting cookies.txt manually.\n"),
-                "info"
+        last_re = getattr(self.mw, "_last_engine_is_re", None)
+        if is_re and last_re is not True:
+            is_browser_cookie = any(
+                rb.isChecked()
+                for rb in [self.mw.rb_chrome, self.mw.rb_edge, self.mw.rb_firefox, self.mw.rb_safari]
+                if rb.isVisible()
             )
+            if is_browser_cookie:
+                from config.config import IS_WIN
+                if IS_WIN:
+                    self.mw.log_thread_safe(
+                    t.get("log_re_win_cookie_tip",
+                          ">>> ℹ️ RE engine: does not support auto cookie extraction on Windows.\n"
+                          "    Please use \"Get cookies.txt\" to export manually if needed.\n"),
+                    "info"
+                    )
+                else:
+                    self.mw.log_thread_safe(
+                    t.get("log_re_cookie_tip",
+                          ">>> ℹ️ RE engine: browser cookies will be auto-extracted. "
+                          "If 403 occurs, try exporting cookies.txt manually.\n"),
+                    "info"
+                    )
+            
+            
+        self.mw._last_engine_is_re = is_re
+            
 
     def apply_mac_hover_fix(self):
         self._enable_mouse_tracking(self.mw)

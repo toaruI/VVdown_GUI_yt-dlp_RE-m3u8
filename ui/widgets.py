@@ -6,6 +6,8 @@ from PySide6.QtCore import QObject, Qt, QEvent
 from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import QLineEdit, QComboBox, QApplication
 
+from config.config import IS_MAC, IS_WIN
+
 
 def setup_styles(system_name):
     """Return (font_ui, font_bold, font_log) with premium UI choices."""
@@ -16,10 +18,22 @@ def setup_styles(system_name):
         font_bold = QFont(font_ui)
         font_bold.setBold(True)
         font_log = QFont("Menlo", 12)
-    else:
-        font_ui = QFont("Segoe UI", 10)
-        font_bold = QFont("Segoe UI", 10, QFont.Bold)
-        font_log = QFont("Consolas", 11)
+    elif system_name == "Windows":
+        font_ui = QFont("Microsoft YaHei UI", 9)
+        font_ui.setHintingPreference(QFont.PreferFullHinting)
+        font_bold = QFont("Microsoft YaHei UI", 9, QFont.Bold)
+        font_bold.setHintingPreference(QFont.PreferFullHinting)
+        font_log = QFont("Consolas", 10)
+        font_log.setHintingPreference(QFont.PreferFullHinting)
+    else:  # Linux
+        font_ui = QFont("Noto Sans CJK SC", 10)
+        if not font_ui.exactMatch():
+            font_ui = QFont("Segoe UI", 10)
+        font_bold = QFont(font_ui)
+        font_bold.setBold(True)
+        font_log = QFont("Noto Sans Mono", 11)
+        if not font_log.exactMatch():
+            font_log = QFont("Consolas", 11)
     return font_ui, font_bold, font_log
 
 
@@ -239,7 +253,107 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     width: 0px;
 }
 """
+# ---------------------------------------------------------------------------
+# Platform-specific style overrides
+# ---------------------------------------------------------------------------
 
+_MACOS_STYLE = """
+/* ── macOS polish ────────────────────────────────────────── */
+* {
+    font-family: ".AppleSystemUIFont", "Helvetica Neue", "PingFang SC", sans-serif;
+}
+
+QPlainTextEdit, QTextEdit {
+    font-family: "Menlo", "SF Mono", monospace;
+}
+
+QPushButton {
+    padding: 5px 16px;
+    border-radius: 6px;
+}
+
+QRadioButton {
+    padding: 3px 8px;
+}
+
+/* macOS 原生风格：更小的圆角 */
+QGroupBox {
+    border-radius: 8px;
+}
+
+QLineEdit, QSpinBox {
+    border-radius: 6px;
+}
+"""
+
+_WINDOWS_STYLE = """
+/* ── Windows polish ──────────────────────────────────────── */
+* {
+    font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+}
+
+QPlainTextEdit, QTextEdit {
+    font-family: "Consolas", "Microsoft YaHei UI", monospace;
+}
+
+QPushButton {
+    padding: 5px 16px;
+}
+
+QPushButton#WinControlButton {
+    font-size: 20px;
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+
+QRadioButton {
+    padding: 4px 10px;
+}
+
+QGroupBox {
+    font-weight: 600;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 20px;
+}
+"""
+
+_LINUX_STYLE = """
+/* ── Linux polish ────────────────────────────────────────── */
+* {
+    font-family: "Noto Sans CJK SC", "Noto Sans", "Ubuntu", "Segoe UI", sans-serif;
+}
+
+QPlainTextEdit, QTextEdit {
+    font-family: "Noto Sans Mono", "Ubuntu Mono", "Consolas", monospace;
+}
+
+QPushButton {
+    padding: 5px 16px;
+}
+
+QRadioButton {
+    padding: 4px 10px;
+}
+
+QGroupBox {
+    font-weight: 600;
+}
+
+/* Linux GTK 主题下 SpinBox 可能偏窄 */
+QSpinBox {
+    padding: 4px 6px;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 20px;
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# Apply
+# ---------------------------------------------------------------------------
 
 def apply_global_style(app):
     """Apply the premium global stylesheet on QApplication (once).
@@ -247,5 +361,17 @@ def apply_global_style(app):
     """
     current = app.styleSheet() or ""
     # Avoid accumulation: only add if not already present
-    if "/* VVdown Premium */" not in current:
-        app.setStyleSheet(current + "\n/* VVdown Premium */\n" + GLOBAL_STYLE)
+    if "/* VVdown Premium */" in current:
+        return
+    
+    extra = GLOBAL_STYLE
+
+    if IS_MAC:
+        extra += _MACOS_STYLE
+    elif IS_WIN:
+        extra += _WINDOWS_STYLE
+    else:
+        extra += _LINUX_STYLE
+
+
+    app.setStyleSheet(current + "\n/* VVdown Premium */\n" + extra)

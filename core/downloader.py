@@ -304,7 +304,7 @@ class DownloaderEngine:
                               url: str,
                               bootstrap_attempted=False):
         """
-        根据引擎类型，将 Cookie 注入到命令中
+        based on available cookie_str, cookie_file_path, and browser_fallback, inject cookies into the command list appropriately:
         """
         if cookie_str:
             if engine == "re":
@@ -343,7 +343,13 @@ class DownloaderEngine:
             if engine != "re":
                 cmd.extend(["--cookies-from-browser", browser_fallback])
             else:
-                if bootstrap_attempted:
+                if IS_WIN:
+                    _safe_log(self.log,
+                              self._t('log_re_win_no_auto_cookie',
+                                      '>>> RE engine on Windows does not support auto cookie extraction.\n'
+                                      '    Please use "Get cookies.txt" to export manually.\n'),
+                              "warning")
+                elif bootstrap_attempted:
                     _safe_log(self.log,
                               self._t('log_re_no_browser',
                                       'Cookie extraction failed. '
@@ -426,12 +432,20 @@ class DownloaderEngine:
         bootstrap_attempted = False
 
         if not cookie_path and cookie_src in ("chrome", "edge", "firefox", "safari"):
+            if engine == "re" and IS_WIN:
+                _safe_log(self.log,
+                          self._t('log_re_win_no_auto_cookie',
+                                  '>>> RE engine on Windows does not support auto cookie extraction.\n'
+                                  '    Please use "Get cookies.txt" to export manually.\n'),
+                          "warning")
+                bootstrap_attempted = True
+            else:
+                bootstrap_browser = cookie_src
+                cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
+                bootstrap_attempted = True
             #print(f"[DEBUG _build_command] ENTERING bootstrap...")
-            bootstrap_browser = cookie_src
-            cookie_path = self._bootstrap_cookies_from_browser(bootstrap_browser, url)
-            bootstrap_attempted = True
             #print(f"[DEBUG _build_command] bootstrap returned: '{cookie_path}'")
-        #else:
+        #   else:
         #    print(f"[DEBUG _build_command] SKIPPED bootstrap")
 
         #print(f"[DEBUG _build_command] after bootstrap: cookie_path={cookie_path}")
