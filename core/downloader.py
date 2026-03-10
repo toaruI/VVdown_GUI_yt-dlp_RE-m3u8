@@ -239,12 +239,16 @@ class DownloaderEngine:
         # try persistent cache first (only if cookie_path is provided.
         # otherwise skip to avoid unnecessary file access)
 
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or url
+
         is_manual = (cookie_src == "file")
 
         if is_manual:
             _safe_log(self.log,
                       self._t('log_cookie_filter',
-                              '>>> Filtering cookies for target host...\n'),
+                              '>>> Filtering cookies for target host: {host}...\n',
+                              host=host),
                       "info")
 
         try:
@@ -264,8 +268,9 @@ class DownloaderEngine:
             if is_manual:
                 _safe_log(self.log,
                         self._t('log_cookie_loaded_file',
-                                '>>> Loaded {count} cookies from file\n', count=len(cookie_str)),
-                        "success")
+                                '>>> Loaded {count} cookies from file: {filename}\n', count=len(cookie_str),
+                                filename=os.path.basename(cookie_path)),
+                                "success")
             else:
                 _safe_log(self.log,
                           self._t('log_cookie_match',
@@ -277,7 +282,7 @@ class DownloaderEngine:
         if is_manual:
             _safe_log(self.log,
                       self._t('log_cookie_none',
-                              'No matching cookies found. File may be wrong.\n'),
+                              'No cookies found for {host}. Falling back to direct download.\n', host=host),
                       "warning")
 
         if os.path.isfile(cookie_path):
