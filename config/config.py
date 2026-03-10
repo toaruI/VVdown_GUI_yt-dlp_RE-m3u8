@@ -35,7 +35,13 @@ def get_config_path():
         # macOS: Contents/Resources/config
         # Windows/Linux: <exe_dir>/config
         base = get_base_path()
-        return os.path.join(base, "config")
+        candidate = os.path.join(base, "config")
+        if os.path.isdir(candidate):
+            return candidate
+        internal = os.path.join(base, "_internal", "config")
+        if os.path.isdir(internal):
+            return internal
+        return candidate
     else:
         return os.path.dirname(os.path.abspath(__file__))
 
