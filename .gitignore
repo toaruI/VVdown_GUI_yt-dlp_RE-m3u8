@@ -1,7 +1,0 @@
-__pycache__/
-*.pyc
-bin/*.exe
-bin/yt-dlp
-bin/N_m3u8DL-RE
-bin/aria2c
-bin/ffmpeg
